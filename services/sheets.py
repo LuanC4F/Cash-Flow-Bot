@@ -2,6 +2,8 @@
 Google Sheets Service - Read/Write data from Google Sheets
 """
 
+import os
+import json
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
@@ -26,10 +28,20 @@ def get_client():
     global _client, _spreadsheet
     
     if _client is None:
-        creds = Credentials.from_service_account_file(
-            config.CREDENTIALS_FILE, 
-            scopes=SCOPES
-        )
+        # Ưu tiên đọc từ env variable (cho Render/cloud)
+        google_creds_json = os.getenv('GOOGLE_CREDENTIALS')
+        
+        if google_creds_json:
+            # Đọc credentials từ env variable
+            creds_dict = json.loads(google_creds_json)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        else:
+            # Đọc từ file (cho local development)
+            creds = Credentials.from_service_account_file(
+                config.CREDENTIALS_FILE, 
+                scopes=SCOPES
+            )
+        
         _client = gspread.authorize(creds)
         _spreadsheet = _client.open_by_key(config.SHEET_ID)
     
