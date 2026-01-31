@@ -3,7 +3,10 @@ CashFlow Bot - Telegram Bot quản lý thu chi
 Main entry point
 """
 
+import os
 import logging
+import threading
+from flask import Flask
 from telegram import Update
 from telegram.ext import (
     Application, 
@@ -62,6 +65,25 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+# ==================== FLASK WEB SERVER ====================
+# Cần thiết cho Render để bind port
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🚀 CashFlow Bot is running!"
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+def run_flask():
+    """Chạy Flask server trong thread riêng"""
+    port = int(os.getenv('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
 # ==================== BẢO MẬT ====================
 # Thông báo khi không có quyền - Tùy chỉnh tại đây (dòng 79)
 UNAUTHORIZED_MESSAGE = "🚫 Bạn không có quyền sử dụng bot này."
@@ -281,6 +303,11 @@ def main():
     
     # Đăng ký error handler
     application.add_error_handler(error_handler)
+    
+    # Chạy Flask server trong thread riêng (cho Render)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"🌐 Web server đang chạy trên port {os.getenv('PORT', 10000)}")
     
     # Chạy bot
     logger.info("🚀 CashFlow Bot đang khởi động...")
