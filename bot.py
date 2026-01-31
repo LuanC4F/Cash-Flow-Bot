@@ -68,21 +68,28 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # ==================== FLASK WEB SERVER ====================
-# Cần thiết cho Render để bind port
+# Cần thiết cho Render để bind port và UptimeRobot
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🚀 CashFlow Bot is running!"
+    from flask import Response
+    return Response("CashFlow Bot is running!", status=200, mimetype='text/plain')
 
 @app.route('/health')
 def health():
-    return "OK", 200
+    from flask import Response
+    return Response("OK", status=200, mimetype='text/plain')
+
+@app.route('/ping')
+def ping():
+    from flask import Response
+    return Response("pong", status=200, mimetype='text/plain')
 
 def run_flask():
     """Chạy Flask server trong thread riêng"""
     port = int(os.getenv('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, threaded=True)
 
 # ==================== BẢO MẬT ====================
 # Thông báo khi không có quyền - Tùy chỉnh tại đây (dòng 79)
