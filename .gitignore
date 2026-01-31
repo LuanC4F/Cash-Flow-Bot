@@ -1,0 +1,38 @@
+# Environment variables (chứa BOT_TOKEN, SHEET_ID)
+.env
+
+# Google credentials (chứa private key)
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database (nếu có)
+*.db
+*.sqlite3
