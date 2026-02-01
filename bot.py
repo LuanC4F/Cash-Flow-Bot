@@ -333,9 +333,14 @@ def main():
     # Chạy bot
     logger.info("🚀 CashFlow Bot đang khởi động...")
     logger.info(f"📊 Sheet ID: {config.SHEET_ID[:20]}...")
-    logger.info("💡 Nhấn Ctrl+C để dừng bot")
+    logger.info("� Xóa các lệnh pending cũ...")
+    logger.info("�💡 Nhấn Ctrl+C để dừng bot")
     
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # drop_pending_updates=True: Xóa tất cả lệnh cũ trong hàng chờ khi bot khởi động
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
 
 
 if __name__ == "__main__":
