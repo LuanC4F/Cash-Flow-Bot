@@ -247,10 +247,10 @@ def get_month_sales_summary(month: int = None, year: int = None) -> Dict:
                 dt = datetime.strptime(date_str, '%d/%m/%Y')
                 if dt.month == month and dt.year == year:
                     qty = row.get('Qty', 0) or 0
-                    price = row.get('Price', 0) or 0
+                    price = row.get('Price', 0) or 0  # Price = Tổng tiền thu (không phải giá/sp)
                     profit = row.get('Profit', 0) or 0
                     
-                    total_revenue += price * qty
+                    total_revenue += price  # Price đã là tổng thu, không cần nhân qty
                     total_profit += profit
                     total_quantity += qty
                     sale_count += 1
