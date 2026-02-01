@@ -149,11 +149,19 @@ def delete_product(sku: str) -> bool:
 
 def add_sale(sku: str, quantity: int, price: float, cost: float, 
              customer: str = "", note: str = "") -> Dict:
-    """Add sale transaction"""
+    """
+    Add sale transaction.
+    
+    Logic mới:
+    - price = TỔNG tiền thu được (không phải giá/sản phẩm)
+    - profit = price - (cost × quantity)
+    - revenue = price (tổng tiền thu)
+    """
     sheet = get_client().worksheet(config.SHEET_SALES)
     
     date = get_local_date()
-    profit = (price - cost) * quantity
+    total_cost = cost * quantity  # Tổng giá gốc
+    profit = price - total_cost   # Lợi nhuận = Tổng thu - Tổng gốc
     
     row_data = [date, sku, quantity, price, cost, profit, customer, note]
     sheet.append_row(row_data)
@@ -162,10 +170,11 @@ def add_sale(sku: str, quantity: int, price: float, cost: float,
         'date': date,
         'sku': sku,
         'quantity': quantity,
-        'price': price,
-        'cost': cost,
+        'price': price,          # Tổng tiền thu
+        'cost': cost,            # Giá gốc/sp
+        'total_cost': total_cost,  # Tổng giá gốc
         'profit': profit,
-        'revenue': price * quantity,
+        'revenue': price,        # Doanh thu = Tổng tiền thu
         'customer': customer
     }
 

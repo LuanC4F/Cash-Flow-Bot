@@ -126,9 +126,9 @@ async def ban_select_sp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"✅ Đã chọn: *{product['name']}* (`{sku}`)\n"
-            f"💵 Giá gốc: {format_currency(product['cost'])}\n\n"
-            "📝 *Bước 2/4:* Nhập giá bán\n\n"
-            "_Ví dụ: 250k, 250000_",
+            f"💵 Giá gốc/SP: {format_currency(product['cost'])}\n\n"
+            "📝 *Bước 2/4:* Nhập *TỔNG TIỀN THU* được\n\n"
+            "_Ví dụ: Bán 3 cái được 250k → nhập 250k_",
             parse_mode='Markdown',
             reply_markup=get_cancel_keyboard()
         )
@@ -139,12 +139,12 @@ async def ban_select_sp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ban_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Nhận giá bán, hỏi số lượng"""
+    """Nhận tổng tiền thu, hỏi số lượng"""
     price = parse_amount(update.message.text.strip())
     
     if price is None:
         await update.message.reply_text(
-            "❌ Giá bán không hợp lệ!\n\n"
+            "❌ Số tiền không hợp lệ!\n\n"
             "Vui lòng nhập lại (ví dụ: 250k, 250000):",
             parse_mode='Markdown',
             reply_markup=get_cancel_keyboard()
@@ -152,15 +152,10 @@ async def ban_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return BAN_PRICE
     
     context.user_data['sale_price'] = price
-    product = context.user_data.get('sale_product', {})
-    
-    profit_per_item = price - product.get('cost', 0)
-    profit_emoji = "📈" if profit_per_item >= 0 else "📉"
     
     await update.message.reply_text(
-        f"✅ Giá bán: *{format_currency(price)}*\n"
-        f"{profit_emoji} Lãi/SP: {format_currency(profit_per_item)}\n\n"
-        "📝 *Bước 3/4:* Nhập số lượng\n\n"
+        f"✅ Tổng tiền thu: *{format_currency(price)}*\n\n"
+        "📝 *Bước 3/4:* Nhập số lượng SP đã bán\n\n"
         "_Nhập số hoặc bỏ qua (mặc định = 1)_",
         parse_mode='Markdown',
         reply_markup=get_skip_keyboard()
@@ -223,14 +218,13 @@ async def ban_customer_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     return await complete_sale(query, context, "", is_callback=True)
 
-
 async def complete_sale(update_or_query, context, customer, is_callback=False):
     """Hoàn tất ghi bán hàng"""
     sku = context.user_data.get('sale_sku', '')
     product = context.user_data.get('sale_product', {})
-    price = context.user_data.get('sale_price', 0)
+    price = context.user_data.get('sale_price', 0)  # Tổng tiền thu
     qty = context.user_data.get('sale_qty', 1)
-    cost = product.get('cost', 0)
+    cost = product.get('cost', 0)  # Giá gốc/sp
     
     try:
         result = sheets.add_sale(
@@ -242,6 +236,7 @@ async def complete_sale(update_or_query, context, customer, is_callback=False):
         )
         
         profit_emoji = "📈" if result['profit'] >= 0 else "📉"
+        total_cost = cost * qty
         
         text = f"""
 ✅ *ĐÃ GHI BÁN HÀNG!*
@@ -251,11 +246,10 @@ async def complete_sale(update_or_query, context, customer, is_callback=False):
 👤 *Người mua:* {customer or 'N/A'}
 
 ━━━ *Chi tiết* ━━━
-💵 Giá gốc: {format_currency(cost)} × {qty}
-💰 Giá bán: {format_currency(price)} × {qty}
+💵 Giá gốc: {format_currency(cost)} × {qty} = {format_currency(total_cost)}
+💰 Tổng thu: {format_currency(price)}
 
 ━━━ *Kết quả* ━━━
-💵 Doanh thu: {format_currency(result['revenue'])}
 {profit_emoji} *Lợi nhuận: {format_currency(result['profit'])}*
 """
         
@@ -281,6 +275,7 @@ async def complete_sale(update_or_query, context, customer, is_callback=False):
     
     context.user_data.clear()
     return ConversationHandler.END
+
 
 
 # ==================== XÓA BÁN HÀNG - CONVERSATION ====================
