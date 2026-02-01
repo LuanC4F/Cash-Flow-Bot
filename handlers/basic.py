@@ -65,14 +65,18 @@ def get_sales_keyboard():
     """Keyboard bán hàng - 2 buttons/hàng"""
     keyboard = [
         [
-            InlineKeyboardButton("🛒 Ghi Bán Hàng", callback_data="sales_add"),
-        ],
-        [
+            InlineKeyboardButton("🛒 Ghi Bán", callback_data="sales_add"),
             InlineKeyboardButton("📋 Lịch Sử", callback_data="sales_history"),
-            InlineKeyboardButton("💹 Lãi Tháng", callback_data="sales_profit"),
         ],
         [
-            InlineKeyboardButton("🗑 Xóa Giao Dịch", callback_data="sales_delete"),
+            InlineKeyboardButton("🔍 Chi Tiết", callback_data="sales_detail"),
+            InlineKeyboardButton("✏️ Sửa Đơn", callback_data="sales_edit"),
+        ],
+        [
+            InlineKeyboardButton("💹 Lãi Tháng", callback_data="sales_profit"),
+            InlineKeyboardButton("🗑 Xóa", callback_data="sales_delete"),
+        ],
+        [
             InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
