@@ -481,26 +481,23 @@ async def chitiet_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
         profit_emoji = "📈" if sale['profit'] >= 0 else "📉"
         total_cost = sale['cost'] * sale['quantity']
         
-        text = f"""
-🔍 *CHI TIẾT ĐƠN HÀNG - Row {row_num}*
+        text = f"""🔍 CHI TIẾT ĐƠN HÀNG - Row {row_num}
 
-📅 *Ngày:* {sale['date']}
-🏷 *Sản phẩm:* {product_name} (`{sale['sku']}`)
-📦 *Số lượng:* {sale['quantity']}
-👤 *Người mua:* {sale['customer'] or 'N/A'}
-📝 *Ghi chú:* {sale['note'] or 'N/A'}
+📅 Ngày: {sale['date']}
+🏷 Sản phẩm: {product_name} ({sale['sku']})
+📦 Số lượng: {sale['quantity']}
+👤 Người mua: {sale['customer'] or 'N/A'}
+📝 Ghi chú: {sale['note'] or 'N/A'}
 
-━━━ *Chi tiết tài chính* ━━━
+━━━ Chi tiết tài chính ━━━
 💵 Giá gốc/SP: {format_currency(sale['cost'])}
 💰 Tổng gốc: {format_currency(total_cost)}
 💎 Tổng thu: {format_currency(sale['price'])}
 
-{profit_emoji} *Lợi nhuận: {format_currency(sale['profit'])}*
-"""
+{profit_emoji} Lợi nhuận: {format_currency(sale['profit'])}"""
         
         await update.message.reply_text(
             text,
-            parse_mode='Markdown',
             reply_markup=get_sales_keyboard()
         )
         
@@ -594,20 +591,17 @@ async def suabh_select_field(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['edit_row'] = row_num
     context.user_data['edit_sale'] = sale
     
-    text = f"""
-✏️ *SỬA ĐƠN HÀNG - Row {row_num}*
+    text = f"""✏️ SỬA ĐƠN HÀNG - Row {row_num}
 
 📦 Số lượng: {sale['quantity']}
 💰 Tổng thu: {format_currency(sale['price'])}
 👤 Người mua: {sale['customer'] or 'N/A'}
 📝 Ghi chú: {sale['note'] or 'N/A'}
 
-🔧 *Chọn trường cần sửa:*
-"""
+🔧 Chọn trường cần sửa:"""
     
     await update.message.reply_text(
         text,
-        parse_mode='Markdown',
         reply_markup=get_edit_field_keyboard()
     )
     
