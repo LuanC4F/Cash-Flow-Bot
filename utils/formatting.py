@@ -5,6 +5,29 @@ Formatting utilities - Format tiền, ngày, parse input
 from typing import Tuple, Optional
 
 
+def escape_markdown(text: str) -> str:
+    """
+    Escape các ký tự đặc biệt trong Telegram Markdown
+    
+    Args:
+        text: Chuỗi cần escape
+    
+    Returns:
+        Chuỗi đã escape
+    """
+    if not text:
+        return ""
+    
+    # Các ký tự đặc biệt trong Markdown cần escape
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    result = text
+    for char in special_chars:
+        result = result.replace(char, f'\\{char}')
+    
+    return result
+
+
 def format_currency(amount: float) -> str:
     """
     Format số tiền theo định dạng Việt Nam

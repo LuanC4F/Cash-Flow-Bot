@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, CallbackQueryHandler, filters
 
 from services import sheets
-from utils.formatting import format_currency, parse_amount, get_month_name
+from utils.formatting import format_currency, parse_amount, get_month_name, escape_markdown
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 # Conversation states
@@ -280,33 +280,31 @@ async def complete_sale(update_or_query, context, customer, note="", is_callback
         total_cost = cost * qty
         
         # Hiển thị ghi chú nếu có
-        note_text = f"📝 *Ghi chú:* {note}\n" if note else ""
+        note_text = f"📝 Ghi chú: {note}\n" if note else ""
+        product_name = product.get('name', '')
         
-        text = f"""
-✅ *ĐÃ GHI BÁN HÀNG!*
+        # Không dùng Markdown để tránh lỗi ký tự đặc biệt
+        text = f"""✅ ĐÃ GHI BÁN HÀNG!
 
-🏷 *Sản phẩm:* {product.get('name', '')} ({sku})
-📦 *Số lượng:* {qty}
-👤 *Người mua:* {customer or 'N/A'}
+🏷 Sản phẩm: {product_name} ({sku})
+📦 Số lượng: {qty}
+👤 Người mua: {customer or 'N/A'}
 {note_text}
-━━━ *Chi tiết* ━━━
+━━━ Chi tiết ━━━
 💵 Giá gốc: {format_currency(cost)} × {qty} = {format_currency(total_cost)}
 💰 Tổng thu: {format_currency(price)}
 
-━━━ *Kết quả* ━━━
-{profit_emoji} *Lợi nhuận: {format_currency(result['profit'])}*
-"""
+━━━ Kết quả ━━━
+{profit_emoji} Lợi nhuận: {format_currency(result['profit'])}"""
         
         if is_callback:
             await update_or_query.edit_message_text(
                 text, 
-                parse_mode='Markdown',
                 reply_markup=get_sales_keyboard()
             )
         else:
             await update_or_query.message.reply_text(
                 text, 
-                parse_mode='Markdown',
                 reply_markup=get_sales_keyboard()
             )
             
