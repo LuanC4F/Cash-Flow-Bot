@@ -10,8 +10,8 @@ from utils.formatting import format_currency, parse_amount, get_month_name
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 # Conversation states
-BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER = range(4)
-XOABH_ROW = 4
+BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE = range(5)
+XOABH_ROW = 5
 
 
 def get_sales_keyboard():
@@ -179,7 +179,7 @@ async def ban_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"✅ Số lượng: *{qty}*\n\n"
-        "📝 *Bước 4/4:* Nhập tên người mua\n\n"
+        "📝 *Bước 4/5:* Nhập tên người mua\n\n"
         "_Nhập tên hoặc bỏ qua_",
         parse_mode='Markdown',
         reply_markup=get_skip_keyboard()
@@ -197,7 +197,7 @@ async def ban_qty_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text(
         "✅ Số lượng: *1*\n\n"
-        "📝 *Bước 4/4:* Nhập tên người mua\n\n"
+        "📝 *Bước 4/5:* Nhập tên người mua\n\n"
         "_Nhập tên hoặc bỏ qua_",
         parse_mode='Markdown',
         reply_markup=get_skip_keyboard()
@@ -207,18 +207,54 @@ async def ban_qty_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ban_customer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Nhận người mua và hoàn tất"""
+    """Nhận người mua, hỏi ghi chú"""
     customer = update.message.text.strip()
-    return await complete_sale(update, context, customer)
+    context.user_data['sale_customer'] = customer
+    
+    await update.message.reply_text(
+        f"✅ Người mua: *{customer}*\n\n"
+        "📝 *Bước 5/5:* Nhập ghi chú\n\n"
+        "_Ví dụ: Đã ship, COD, v.v. hoặc bỏ qua_",
+        parse_mode='Markdown',
+        reply_markup=get_skip_keyboard()
+    )
+    
+    return BAN_NOTE
 
 
 async def ban_customer_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bỏ qua người mua và hoàn tất"""
+    """Bỏ qua người mua, hỏi ghi chú"""
     query = update.callback_query
     await query.answer()
-    return await complete_sale(query, context, "", is_callback=True)
+    
+    context.user_data['sale_customer'] = ""
+    
+    await query.edit_message_text(
+        "✅ Người mua: _(bỏ qua)_\n\n"
+        "📝 *Bước 5/5:* Nhập ghi chú\n\n"
+        "_Ví dụ: Đã ship, COD, v.v. hoặc bỏ qua_",
+        parse_mode='Markdown',
+        reply_markup=get_skip_keyboard()
+    )
+    
+    return BAN_NOTE
 
-async def complete_sale(update_or_query, context, customer, is_callback=False):
+
+async def ban_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Nhận ghi chú và hoàn tất"""
+    note = update.message.text.strip()
+    customer = context.user_data.get('sale_customer', '')
+    return await complete_sale(update, context, customer, note=note)
+
+
+async def ban_note_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bỏ qua ghi chú và hoàn tất"""
+    query = update.callback_query
+    await query.answer()
+    customer = context.user_data.get('sale_customer', '')
+    return await complete_sale(query, context, customer, note="", is_callback=True)
+
+async def complete_sale(update_or_query, context, customer, note="", is_callback=False):
     """Hoàn tất ghi bán hàng"""
     sku = context.user_data.get('sale_sku', '')
     product = context.user_data.get('sale_product', {})
@@ -232,11 +268,15 @@ async def complete_sale(update_or_query, context, customer, is_callback=False):
             quantity=qty,
             price=price,
             cost=cost,
-            customer=customer
+            customer=customer,
+            note=note
         )
         
         profit_emoji = "📈" if result['profit'] >= 0 else "📉"
         total_cost = cost * qty
+        
+        # Hiển thị ghi chú nếu có
+        note_text = f"📝 *Ghi chú:* {note}\n" if note else ""
         
         text = f"""
 ✅ *ĐÃ GHI BÁN HÀNG!*
@@ -244,7 +284,7 @@ async def complete_sale(update_or_query, context, customer, is_callback=False):
 🏷 *Sản phẩm:* {product.get('name', '')} ({sku})
 📦 *Số lượng:* {qty}
 👤 *Người mua:* {customer or 'N/A'}
-
+{note_text}
 ━━━ *Chi tiết* ━━━
 💵 Giá gốc: {format_currency(cost)} × {qty} = {format_currency(total_cost)}
 💰 Tổng thu: {format_currency(price)}

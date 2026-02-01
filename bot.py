@@ -37,10 +37,11 @@ from handlers.product import (
 # Sales handlers
 from handlers.sales import (
     ban_command, dsbh_command, laithang_command, xoabh_command,
-    ban_start, ban_select_sp, ban_price, ban_qty, ban_qty_skip, ban_customer, ban_customer_skip,
+    ban_start, ban_select_sp, ban_price, ban_qty, ban_qty_skip, 
+    ban_customer, ban_customer_skip, ban_note, ban_note_skip,
     xoabh_start, xoabh_confirm,
     cancel_sales,
-    BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER,
+    BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE,
     XOABH_ROW
 )
 
@@ -229,6 +230,10 @@ def main():
             BAN_CUSTOMER: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ban_customer),
                 CallbackQueryHandler(ban_customer_skip, pattern="^skip_step$"),
+            ],
+            BAN_NOTE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ban_note),
+                CallbackQueryHandler(ban_note_skip, pattern="^skip_step$"),
             ],
         },
         fallbacks=[
