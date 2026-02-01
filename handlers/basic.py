@@ -245,7 +245,7 @@ Xem báo cáo thu chi và lợi nhuận:
 
 *📦 Sản Phẩm:* Thêm SP trước khi bán
 
-*🛒 Bán Hàng:* Chọn SP → nhập giá bán → nhập SL → nhập người mua
+*🛒 Bán Hàng:* Chọn SP → nhập giá bán → nhập SL → Nhập người mua → Ghi chú
 
 ━━━ *💡 Mẹo* ━━━
 • `50k` = 50,000đ

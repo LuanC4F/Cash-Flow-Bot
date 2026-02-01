@@ -105,6 +105,11 @@ def find_product_by_name(name: str) -> Optional[Dict]:
     return None
 
 
+def get_product(sku: str) -> Optional[Dict]:
+    """Get product by SKU (alias for find_product_by_sku)"""
+    return find_product_by_sku(sku)
+
+
 def add_product(sku: str, name: str, cost: float) -> bool:
     """Add new product"""
     sheet = get_client().worksheet(config.SHEET_PRODUCTS)
