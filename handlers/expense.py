@@ -13,7 +13,7 @@ from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 CHI_AMOUNT, CHI_DESC = range(2)
 XOACHI_ROW = 2
 
-# Categories
+# Categories - text đầy đủ
 CATEGORIES = [
     ("Living", "🏠", "Sinh hoạt"),
     ("Personal", "👤", "Cá nhân"),
@@ -26,32 +26,30 @@ CATEGORIES = [
 
 
 def get_expense_keyboard():
-    """Keyboard chi tiêu với đầy đủ buttons"""
+    """Keyboard chi tiêu - 2 buttons/hàng"""
     keyboard = [
         [
             InlineKeyboardButton("💸 Ghi Chi Tiêu", callback_data="expense_add"),
         ],
         [
-            InlineKeyboardButton("📋 Xem Hôm Nay", callback_data="chitieu_today"),
-            InlineKeyboardButton("📊 Thống Kê Tháng", callback_data="expense_month"),
+            InlineKeyboardButton("📋 Hôm Nay", callback_data="chitieu_today"),
+            InlineKeyboardButton("📊 Tháng", callback_data="expense_month"),
         ],
         [
             InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="expense_delete"),
-        ],
-        [
-            InlineKeyboardButton("🔙 Menu Chính", callback_data="menu_main"),
+            InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def get_category_keyboard():
-    """Keyboard chọn category"""
+    """Keyboard chọn category - 2 buttons mỗi hàng để hiển thị đủ text"""
     keyboard = []
     row = []
     for i, (cat, emoji, name) in enumerate(CATEGORIES):
         row.append(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"cat_{cat}"))
-        if len(row) == 3 or i == len(CATEGORIES) - 1:
+        if len(row) == 2 or i == len(CATEGORIES) - 1:
             keyboard.append(row)
             row = []
     keyboard.append([InlineKeyboardButton("❌ Hủy", callback_data="cancel_expense")])

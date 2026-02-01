@@ -8,14 +8,14 @@ from telegram.error import BadRequest
 
 
 def get_main_menu_keyboard():
-    """Tạo keyboard menu chính"""
+    """Tạo keyboard menu chính - 2 buttons/hàng"""
     keyboard = [
         [
             InlineKeyboardButton("💸 Chi Tiêu", callback_data="menu_chi"),
-            InlineKeyboardButton("📦 Sản Phẩm", callback_data="menu_sanpham"),
+            InlineKeyboardButton("🛒 Bán Hàng", callback_data="menu_ban"),
         ],
         [
-            InlineKeyboardButton("🛒 Bán Hàng", callback_data="menu_ban"),
+            InlineKeyboardButton("📦 Sản Phẩm", callback_data="menu_sanpham"),
             InlineKeyboardButton("📊 Thống Kê", callback_data="menu_thongke"),
         ],
         [
@@ -26,75 +26,69 @@ def get_main_menu_keyboard():
 
 
 def get_expense_keyboard():
-    """Keyboard chi tiêu với đầy đủ buttons"""
+    """Keyboard chi tiêu - 2 buttons/hàng"""
     keyboard = [
         [
             InlineKeyboardButton("💸 Ghi Chi Tiêu", callback_data="expense_add"),
         ],
         [
-            InlineKeyboardButton("📋 Xem Hôm Nay", callback_data="chitieu_today"),
-            InlineKeyboardButton("📊 Thống Kê Tháng", callback_data="expense_month"),
+            InlineKeyboardButton("📋 Hôm Nay", callback_data="chitieu_today"),
+            InlineKeyboardButton("📊 Tháng", callback_data="expense_month"),
         ],
         [
             InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="expense_delete"),
-        ],
-        [
-            InlineKeyboardButton("🔙 Menu Chính", callback_data="menu_main"),
+            InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def get_product_keyboard():
-    """Keyboard sản phẩm với đầy đủ buttons"""
+    """Keyboard sản phẩm - 2 buttons/hàng"""
     keyboard = [
         [
-            InlineKeyboardButton("📋 Xem Danh Sách SP", callback_data="sanpham_list"),
+            InlineKeyboardButton("📋 Danh Sách SP", callback_data="sanpham_list"),
         ],
         [
             InlineKeyboardButton("➕ Thêm SP", callback_data="sanpham_add"),
             InlineKeyboardButton("✏️ Sửa Giá", callback_data="sanpham_edit"),
-            InlineKeyboardButton("🗑 Xóa SP", callback_data="sanpham_delete"),
         ],
         [
-            InlineKeyboardButton("🔙 Menu Chính", callback_data="menu_main"),
+            InlineKeyboardButton("🗑 Xóa SP", callback_data="sanpham_delete"),
+            InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def get_sales_keyboard():
-    """Keyboard bán hàng với đầy đủ buttons"""
+    """Keyboard bán hàng - 2 buttons/hàng"""
     keyboard = [
         [
             InlineKeyboardButton("🛒 Ghi Bán Hàng", callback_data="sales_add"),
         ],
         [
-            InlineKeyboardButton("📋 Lịch Sử Bán", callback_data="sales_history"),
+            InlineKeyboardButton("📋 Lịch Sử", callback_data="sales_history"),
             InlineKeyboardButton("💹 Lãi Tháng", callback_data="sales_profit"),
         ],
         [
             InlineKeyboardButton("🗑 Xóa Giao Dịch", callback_data="sales_delete"),
-        ],
-        [
-            InlineKeyboardButton("🔙 Menu Chính", callback_data="menu_main"),
+            InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def get_stats_keyboard():
-    """Keyboard thống kê"""
+    """Keyboard thống kê - 2 buttons/hàng"""
     keyboard = [
         [
             InlineKeyboardButton("📅 Hôm Nay", callback_data="stats_today"),
             InlineKeyboardButton("📆 Tháng Này", callback_data="stats_month"),
         ],
         [
-            InlineKeyboardButton("💹 Lợi Nhuận Tháng", callback_data="stats_profit"),
-        ],
-        [
-            InlineKeyboardButton("🔙 Menu Chính", callback_data="menu_main"),
+            InlineKeyboardButton("💹 Lợi Nhuận", callback_data="stats_profit"),
+            InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
