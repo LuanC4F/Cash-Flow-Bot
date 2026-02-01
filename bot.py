@@ -120,14 +120,28 @@ async def check_user_permission(update: Update, context) -> bool:
 
 async def error_handler(update: Update, context):
     """Xử lý lỗi"""
+    error_msg = str(context.error)
+    
+    # Bỏ qua lỗi Conflict (có bot khác đang chạy)
+    if "Conflict" in error_msg and "terminated by other" in error_msg:
+        logger.warning("⚠️ Conflict detected - another bot instance may be running")
+        return
+    
+    # Bỏ qua lỗi network tạm thời
+    if "NetworkError" in error_msg or "TimedOut" in error_msg:
+        logger.warning(f"⚠️ Network issue: {error_msg}")
+        return
+    
     logger.error(f"Exception while handling an update: {context.error}")
     
     if update and update.effective_message:
-        await update.effective_message.reply_text(
-            "❌ Có lỗi xảy ra. Vui lòng thử lại sau.\n\n"
-            f"Lỗi: `{str(context.error)}`",
-            parse_mode='Markdown'
-        )
+        try:
+            await update.effective_message.reply_text(
+                "❌ Có lỗi xảy ra. Vui lòng thử lại sau.",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass  # Bỏ qua nếu không gửi được
 
 
 async def unknown_command(update: Update, context):
