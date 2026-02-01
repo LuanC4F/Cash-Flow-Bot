@@ -337,10 +337,11 @@ Xem báo cáo thu chi và lợi nhuận:
             else:
                 text = "🛒 *LỊCH SỬ BÁN HÀNG*\n\n"
                 for s in sales:
-                    profit_emoji = "📈" if s['profit'] >= 0 else "📉"
+                    profit = float(s['profit']) if s['profit'] else 0
+                    profit_emoji = "📈" if profit >= 0 else "📉"
                     text += f"🏷 *{s['sku']}* - Row {s['row']}\n"
                     text += f"   📅 {s['date']} | Qty: {s['quantity']}\n"
-                    text += f"   {profit_emoji} Profit: {format_currency(s['profit'])}\n\n"
+                    text += f"   {profit_emoji} Profit: {format_currency(profit)}\n\n"
             
             await safe_edit(query, text, get_sales_keyboard())
         except Exception as e:

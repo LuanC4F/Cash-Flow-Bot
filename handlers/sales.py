@@ -299,8 +299,9 @@ async def xoabh_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             text = "🗑 *XÓA GIAO DỊCH*\n\n📋 *Giao dịch gần đây:*\n"
             for s in sales:
-                profit_emoji = "📈" if s['profit'] >= 0 else "📉"
-                text += f"• *Row {s['row']}*: {s['sku']} - {format_currency(s['profit'])} ({s['date']})\n"
+                profit = float(s['profit']) if s['profit'] else 0
+                profit_emoji = "📈" if profit >= 0 else "📉"
+                text += f"• *Row {s['row']}*: {s['sku']} - {format_currency(profit)} ({s['date']})\n"
             
             text += "\n⚠️ Nhập số row cần xóa:"
             
@@ -430,10 +431,11 @@ async def dsbh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = "🛒 *LỊCH SỬ BÁN HÀNG*\n\n"
             for s in sales:
-                profit_emoji = "📈" if s['profit'] >= 0 else "📉"
+                profit = float(s['profit']) if s['profit'] else 0
+                profit_emoji = "📈" if profit >= 0 else "📉"
                 text += f"🏷 *{s['sku']}* - Row {s['row']}\n"
                 text += f"   📅 {s['date']} | Qty: {s['quantity']}\n"
-                text += f"   {profit_emoji} Profit: {format_currency(s['profit'])}\n\n"
+                text += f"   {profit_emoji} Profit: {format_currency(profit)}\n\n"
         
         await update.message.reply_text(text, parse_mode='Markdown', reply_markup=get_sales_keyboard())
     except Exception as e:
