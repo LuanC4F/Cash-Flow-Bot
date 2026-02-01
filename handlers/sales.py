@@ -12,23 +12,27 @@ from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 # Conversation states
 BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE = range(5)
 XOABH_ROW = 5
+CHITIET_ROW = 6
+SUABH_ROW, SUABH_FIELD, SUABH_VALUE = range(7, 10)
 
 
 def get_sales_keyboard():
     """Keyboard bán hàng với đầy đủ buttons"""
     keyboard = [
         [
-            InlineKeyboardButton("🛒 Ghi Bán Hàng", callback_data="sales_add"),
+            InlineKeyboardButton("🛒 Ghi Bán", callback_data="sales_add"),
+            InlineKeyboardButton("📋 Lịch Sử", callback_data="sales_history"),
         ],
         [
-            InlineKeyboardButton("📋 Lịch Sử Bán", callback_data="sales_history"),
+            InlineKeyboardButton("🔍 Chi Tiết", callback_data="sales_detail"),
+            InlineKeyboardButton("✏️ Sửa Đơn", callback_data="sales_edit"),
+        ],
+        [
             InlineKeyboardButton("💹 Lãi Tháng", callback_data="sales_profit"),
+            InlineKeyboardButton("🗑 Xóa", callback_data="sales_delete"),
         ],
         [
-            InlineKeyboardButton("🗑 Xóa Giao Dịch", callback_data="sales_delete"),
-        ],
-        [
-            InlineKeyboardButton("🔙 Menu Chính", callback_data="menu_main"),
+            InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -403,6 +407,300 @@ async def cancel_sales(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown',
             reply_markup=get_sales_keyboard()
         )
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+# ==================== XEM CHI TIẾT ĐƠN HÀNG ====================
+
+async def chitiet_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bắt đầu xem chi tiết"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        
+        try:
+            sales = sheets.get_recent_sales(limit=10)
+            
+            if not sales:
+                await query.edit_message_text(
+                    "🔍 *XEM CHI TIẾT*\n\n📭 Chưa có giao dịch nào.",
+                    parse_mode='Markdown',
+                    reply_markup=get_sales_keyboard()
+                )
+                return ConversationHandler.END
+            
+            text = "🔍 *XEM CHI TIẾT ĐƠN HÀNG*\n\n📋 *Giao dịch gần đây:*\n"
+            for s in sales:
+                profit = float(s['profit']) if s['profit'] else 0
+                text += f"• *Row {s['row']}*: {s['sku']} - {format_currency(profit)} ({s['date']})\n"
+            
+            text += "\n📝 Nhập số row để xem chi tiết:"
+            
+            await query.edit_message_text(
+                text,
+                parse_mode='Markdown',
+                reply_markup=get_cancel_keyboard()
+            )
+            
+            return CHITIET_ROW
+            
+        except Exception as e:
+            await query.edit_message_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
+            return ConversationHandler.END
+    
+    return CHITIET_ROW
+
+
+async def chitiet_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hiển thị chi tiết đơn hàng"""
+    try:
+        row_num = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Số row không hợp lệ!\n\nVui lòng nhập lại:",
+            parse_mode='Markdown',
+            reply_markup=get_cancel_keyboard()
+        )
+        return CHITIET_ROW
+    
+    try:
+        sale = sheets.get_sale_by_row(row_num)
+        
+        if not sale:
+            await update.message.reply_text(
+                f"❌ Không tìm thấy đơn hàng ở row {row_num}",
+                parse_mode='Markdown',
+                reply_markup=get_sales_keyboard()
+            )
+            return ConversationHandler.END
+        
+        # Get product info
+        product = sheets.get_product(sale['sku'])
+        product_name = product.get('name', sale['sku']) if product else sale['sku']
+        
+        profit_emoji = "📈" if sale['profit'] >= 0 else "📉"
+        total_cost = sale['cost'] * sale['quantity']
+        
+        text = f"""
+🔍 *CHI TIẾT ĐƠN HÀNG - Row {row_num}*
+
+📅 *Ngày:* {sale['date']}
+🏷 *Sản phẩm:* {product_name} (`{sale['sku']}`)
+📦 *Số lượng:* {sale['quantity']}
+👤 *Người mua:* {sale['customer'] or 'N/A'}
+📝 *Ghi chú:* {sale['note'] or 'N/A'}
+
+━━━ *Chi tiết tài chính* ━━━
+💵 Giá gốc/SP: {format_currency(sale['cost'])}
+💰 Tổng gốc: {format_currency(total_cost)}
+💎 Tổng thu: {format_currency(sale['price'])}
+
+{profit_emoji} *Lợi nhuận: {format_currency(sale['profit'])}*
+"""
+        
+        await update.message.reply_text(
+            text,
+            parse_mode='Markdown',
+            reply_markup=get_sales_keyboard()
+        )
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
+    
+    return ConversationHandler.END
+
+
+# ==================== CHỈNH SỬA ĐƠN HÀNG ====================
+
+def get_edit_field_keyboard():
+    """Keyboard chọn field cần sửa"""
+    keyboard = [
+        [
+            InlineKeyboardButton("📦 Số lượng", callback_data="edit_qty"),
+            InlineKeyboardButton("💰 Tổng thu", callback_data="edit_price"),
+        ],
+        [
+            InlineKeyboardButton("👤 Người mua", callback_data="edit_customer"),
+            InlineKeyboardButton("📝 Ghi chú", callback_data="edit_note"),
+        ],
+        [
+            InlineKeyboardButton("❌ Hủy", callback_data="cancel_sales"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def suabh_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bắt đầu sửa đơn hàng"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        
+        try:
+            sales = sheets.get_recent_sales(limit=10)
+            
+            if not sales:
+                await query.edit_message_text(
+                    "✏️ *SỬA ĐƠN HÀNG*\n\n📭 Chưa có giao dịch nào.",
+                    parse_mode='Markdown',
+                    reply_markup=get_sales_keyboard()
+                )
+                return ConversationHandler.END
+            
+            text = "✏️ *SỬA ĐƠN HÀNG*\n\n📋 *Giao dịch gần đây:*\n"
+            for s in sales:
+                profit = float(s['profit']) if s['profit'] else 0
+                text += f"• *Row {s['row']}*: {s['sku']} - {format_currency(profit)} ({s['date']})\n"
+            
+            text += "\n📝 Nhập số row cần sửa:"
+            
+            await query.edit_message_text(
+                text,
+                parse_mode='Markdown',
+                reply_markup=get_cancel_keyboard()
+            )
+            
+            return SUABH_ROW
+            
+        except Exception as e:
+            await query.edit_message_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
+            return ConversationHandler.END
+    
+    return SUABH_ROW
+
+
+async def suabh_select_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chọn trường cần sửa"""
+    try:
+        row_num = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Số row không hợp lệ!\n\nVui lòng nhập lại:",
+            parse_mode='Markdown',
+            reply_markup=get_cancel_keyboard()
+        )
+        return SUABH_ROW
+    
+    # Check if row exists
+    sale = sheets.get_sale_by_row(row_num)
+    if not sale:
+        await update.message.reply_text(
+            f"❌ Không tìm thấy đơn hàng ở row {row_num}",
+            parse_mode='Markdown',
+            reply_markup=get_sales_keyboard()
+        )
+        return ConversationHandler.END
+    
+    context.user_data['edit_row'] = row_num
+    context.user_data['edit_sale'] = sale
+    
+    text = f"""
+✏️ *SỬA ĐƠN HÀNG - Row {row_num}*
+
+📦 Số lượng: {sale['quantity']}
+💰 Tổng thu: {format_currency(sale['price'])}
+👤 Người mua: {sale['customer'] or 'N/A'}
+📝 Ghi chú: {sale['note'] or 'N/A'}
+
+🔧 *Chọn trường cần sửa:*
+"""
+    
+    await update.message.reply_text(
+        text,
+        parse_mode='Markdown',
+        reply_markup=get_edit_field_keyboard()
+    )
+    
+    return SUABH_FIELD
+
+
+async def suabh_get_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Nhận field cần sửa và hỏi giá trị mới"""
+    query = update.callback_query
+    await query.answer()
+    
+    field = query.data.replace("edit_", "")
+    context.user_data['edit_field'] = field
+    
+    field_names = {
+        'qty': 'Số lượng',
+        'price': 'Tổng thu',
+        'customer': 'Người mua',
+        'note': 'Ghi chú'
+    }
+    
+    field_name = field_names.get(field, field)
+    sale = context.user_data.get('edit_sale', {})
+    
+    current_values = {
+        'qty': sale.get('quantity', 0),
+        'price': format_currency(sale.get('price', 0)),
+        'customer': sale.get('customer', ''),
+        'note': sale.get('note', '')
+    }
+    
+    await query.edit_message_text(
+        f"✏️ *Sửa {field_name}*\n\n"
+        f"Giá trị hiện tại: *{current_values.get(field, 'N/A')}*\n\n"
+        f"📝 Nhập giá trị mới:",
+        parse_mode='Markdown',
+        reply_markup=get_cancel_keyboard()
+    )
+    
+    return SUABH_VALUE
+
+
+async def suabh_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lưu giá trị mới"""
+    new_value = update.message.text.strip()
+    row_num = context.user_data.get('edit_row')
+    field = context.user_data.get('edit_field')
+    
+    try:
+        if field == 'qty':
+            quantity = int(new_value)
+            success = sheets.update_sale(row_num, quantity=quantity)
+        elif field == 'price':
+            price = parse_amount(new_value)
+            if price is None:
+                await update.message.reply_text(
+                    "❌ Số tiền không hợp lệ!\n\nVui lòng nhập lại:",
+                    parse_mode='Markdown',
+                    reply_markup=get_cancel_keyboard()
+                )
+                return SUABH_VALUE
+            success = sheets.update_sale(row_num, price=price)
+        elif field == 'customer':
+            success = sheets.update_sale(row_num, customer=new_value)
+        elif field == 'note':
+            success = sheets.update_sale(row_num, note=new_value)
+        else:
+            success = False
+        
+        if success:
+            await update.message.reply_text(
+                f"✅ *Đã cập nhật row {row_num}!*",
+                parse_mode='Markdown',
+                reply_markup=get_sales_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ Không thể cập nhật row {row_num}.",
+                parse_mode='Markdown',
+                reply_markup=get_sales_keyboard()
+            )
+            
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Giá trị không hợp lệ!\n\nVui lòng nhập lại:",
+            parse_mode='Markdown',
+            reply_markup=get_cancel_keyboard()
+        )
+        return SUABH_VALUE
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
     
     context.user_data.clear()
     return ConversationHandler.END

@@ -40,9 +40,11 @@ from handlers.sales import (
     ban_start, ban_select_sp, ban_price, ban_qty, ban_qty_skip, 
     ban_customer, ban_customer_skip, ban_note, ban_note_skip,
     xoabh_start, xoabh_confirm,
+    chitiet_start, chitiet_show,
+    suabh_start, suabh_select_field, suabh_get_field, suabh_save,
     cancel_sales,
     BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE,
-    XOABH_ROW
+    XOABH_ROW, CHITIET_ROW, SUABH_ROW, SUABH_FIELD, SUABH_VALUE
 )
 
 # Expense handlers
@@ -256,6 +258,34 @@ def main():
         per_message=False,
     )
     
+    # Xem chi tiết đơn hàng
+    chitiet_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(chitiet_start, pattern="^sales_detail$")],
+        states={
+            CHITIET_ROW: [MessageHandler(filters.TEXT & ~filters.COMMAND, chitiet_show)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_sales, pattern="^cancel_sales$"),
+            CommandHandler("cancel", cancel_sales),
+        ],
+        per_message=False,
+    )
+    
+    # Sửa đơn hàng
+    suabh_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(suabh_start, pattern="^sales_edit$")],
+        states={
+            SUABH_ROW: [MessageHandler(filters.TEXT & ~filters.COMMAND, suabh_select_field)],
+            SUABH_FIELD: [CallbackQueryHandler(suabh_get_field, pattern="^edit_")],
+            SUABH_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, suabh_save)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_sales, pattern="^cancel_sales$"),
+            CommandHandler("cancel", cancel_sales),
+        ],
+        per_message=False,
+    )
+    
     # ==================== EXPENSE CONVERSATIONS ====================
     
     # Ghi chi tiêu
@@ -296,6 +326,8 @@ def main():
     application.add_handler(xoasp_conv)
     application.add_handler(ban_conv)
     application.add_handler(xoabh_conv)
+    application.add_handler(chitiet_conv)
+    application.add_handler(suabh_conv)
     application.add_handler(chi_conv)
     application.add_handler(xoachi_conv)
     

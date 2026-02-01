@@ -293,6 +293,75 @@ def delete_sale(row_num: int) -> bool:
         return False
 
 
+def get_sale_by_row(row_num: int) -> Optional[Dict]:
+    """Get sale details by row number"""
+    try:
+        sheet = get_client().worksheet(config.SHEET_SALES)
+        row_values = sheet.row_values(row_num)
+        
+        if not row_values or len(row_values) < 6:
+            return None
+        
+        return {
+            'row': row_num,
+            'date': row_values[0] if len(row_values) > 0 else '',
+            'sku': row_values[1] if len(row_values) > 1 else '',
+            'quantity': int(row_values[2]) if len(row_values) > 2 and row_values[2] else 0,
+            'price': float(row_values[3]) if len(row_values) > 3 and row_values[3] else 0,
+            'cost': float(row_values[4]) if len(row_values) > 4 and row_values[4] else 0,
+            'profit': float(row_values[5]) if len(row_values) > 5 and row_values[5] else 0,
+            'customer': row_values[6] if len(row_values) > 6 else '',
+            'note': row_values[7] if len(row_values) > 7 else ''
+        }
+    except Exception:
+        return None
+
+
+def update_sale(row_num: int, quantity: int = None, price: float = None, 
+                customer: str = None, note: str = None) -> bool:
+    """
+    Update sale by row number.
+    Only updates fields that are provided (not None).
+    Recalculates profit if price or quantity changes.
+    """
+    try:
+        sheet = get_client().worksheet(config.SHEET_SALES)
+        
+        # Get current values
+        current = get_sale_by_row(row_num)
+        if not current:
+            return False
+        
+        # Update values
+        new_qty = quantity if quantity is not None else current['quantity']
+        new_price = price if price is not None else current['price']
+        new_customer = customer if customer is not None else current['customer']
+        new_note = note if note is not None else current['note']
+        
+        # Recalculate profit
+        cost = current['cost']
+        new_profit = new_price - (cost * new_qty)
+        
+        # Update cells
+        if quantity is not None:
+            sheet.update_cell(row_num, 3, new_qty)  # Column C = Qty
+        if price is not None:
+            sheet.update_cell(row_num, 4, new_price)  # Column D = Price
+            sheet.update_cell(row_num, 6, new_profit)  # Column F = Profit
+        if customer is not None:
+            sheet.update_cell(row_num, 7, new_customer)  # Column G = Customer
+        if note is not None:
+            sheet.update_cell(row_num, 8, new_note)  # Column H = Note
+        
+        # If quantity changed, also update profit
+        if quantity is not None and price is None:
+            sheet.update_cell(row_num, 6, new_profit)
+        
+        return True
+    except Exception:
+        return False
+
+
 # ==================== EXPENSES ====================
 
 def add_expense(amount: float, description: str, category: str = "Living") -> Dict:
