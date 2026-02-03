@@ -239,6 +239,7 @@ def get_month_sales_summary(month: int = None, year: int = None) -> Dict:
     total_profit = 0
     total_quantity = 0
     sale_count = 0
+    by_day = {}  # Thêm thống kê theo ngày
     
     for row in records:
         date_str = row.get('Date', '')
@@ -247,13 +248,21 @@ def get_month_sales_summary(month: int = None, year: int = None) -> Dict:
                 dt = datetime.strptime(date_str, '%d/%m/%Y')
                 if dt.month == month and dt.year == year:
                     qty = row.get('Qty', 0) or 0
-                    price = row.get('Price', 0) or 0  # Price = Tổng tiền thu (không phải giá/sp)
+                    price = row.get('Price', 0) or 0  # Price = Tổng tiền thu
                     profit = row.get('Profit', 0) or 0
+                    day = dt.day
                     
-                    total_revenue += price  # Price đã là tổng thu, không cần nhân qty
+                    total_revenue += price
                     total_profit += profit
                     total_quantity += qty
                     sale_count += 1
+                    
+                    # Thống kê theo ngày
+                    if day not in by_day:
+                        by_day[day] = {'revenue': 0, 'profit': 0, 'count': 0}
+                    by_day[day]['revenue'] += price
+                    by_day[day]['profit'] += profit
+                    by_day[day]['count'] += 1
             except ValueError:
                 pass
     
@@ -263,8 +272,38 @@ def get_month_sales_summary(month: int = None, year: int = None) -> Dict:
         'sale_count': sale_count,
         'total_quantity': total_quantity,
         'total_revenue': total_revenue,
-        'total_profit': total_profit
+        'total_profit': total_profit,
+        'by_day': by_day
     }
+
+
+def get_sales_by_date(day: int, month: int = None, year: int = None) -> List[Dict]:
+    """Get sales details for a specific date"""
+    if month is None:
+        month = datetime.now(config.VN_TIMEZONE).month
+    if year is None:
+        year = datetime.now(config.VN_TIMEZONE).year
+    
+    target_date = f"{day:02d}/{month:02d}/{year}"
+    
+    sheet = get_client().worksheet(config.SHEET_SALES)
+    records = sheet.get_all_records()
+    
+    sales = []
+    for i, row in enumerate(records, start=2):
+        if row.get('Date', '') == target_date:
+            sales.append({
+                'row': i,
+                'date': row.get('Date', ''),
+                'sku': row.get('SKU', ''),
+                'quantity': row.get('Qty', 0),
+                'price': row.get('Price', 0),
+                'profit': row.get('Profit', 0),
+                'customer': row.get('Customer', ''),
+                'note': row.get('Note', '')
+            })
+    
+    return sales
 
 
 def get_recent_sales(limit: int = 10) -> List[Dict]:

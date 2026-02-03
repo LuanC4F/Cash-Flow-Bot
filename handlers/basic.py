@@ -420,16 +420,80 @@ Xem báo cáo thu chi và lợi nhuận:
             summary = sheets.get_month_sales_summary()
             month_name = get_month_name(summary['month'])
             
-            text = f"💹 *LỢI NHUẬN {month_name.upper()}/{summary['year']}*\n\n"
+            text = f"💹 LỢI NHUẬN {month_name.upper()}/{summary['year']}\n\n"
             text += f"🛒 Số lần bán: {summary['sale_count']}\n"
             text += f"📦 Tổng SP: {summary['total_quantity']}\n"
             text += f"💰 Doanh thu: {format_currency(summary['total_revenue'])}\n"
             text += f"━━━━━━━━━━━━━━━━━\n"
-            text += f"📈 *Lợi nhuận: {format_currency(summary['total_profit'])}*"
+            text += f"📈 Lợi nhuận: {format_currency(summary['total_profit'])}\n"
             
-            await safe_edit(query, text, get_stats_keyboard())
+            # Thêm doanh thu theo ngày
+            if summary.get('by_day'):
+                text += "\n📅 Theo ngày:\n"
+                sorted_days = sorted(summary['by_day'].items())
+                for day, data_day in sorted_days:
+                    text += f"   • Ngày {day}: {format_currency(data_day['revenue'])} (Lãi: {format_currency(data_day['profit'])})\n"
+            
+            # Tạo keyboard với buttons cho từng ngày có bán hàng
+            keyboard = []
+            if summary.get('by_day'):
+                days = sorted(summary['by_day'].keys())
+                row = []
+                for day in days:
+                    row.append(InlineKeyboardButton(
+                        f"📅 {day}", 
+                        callback_data=f"sales_day_{day}"
+                    ))
+                    if len(row) == 4:  # 4 buttons/hàng
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("🔙 Menu Bán", callback_data="menu_ban")])
+            
+            await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
         except Exception as e:
-            await safe_edit(query, f"❌ Lỗi: `{str(e)}`", get_back_keyboard())
+            await safe_edit(query, f"❌ Lỗi: {str(e)}", get_back_keyboard())
+    
+    # Xem chi tiết bán hàng theo ngày
+    elif data.startswith("sales_day_"):
+        from services import sheets
+        from utils.formatting import format_currency
+        
+        try:
+            day = int(data.replace("sales_day_", ""))
+            sales = sheets.get_sales_by_date(day)
+            
+            from datetime import datetime
+            import config
+            month = datetime.now(config.VN_TIMEZONE).month
+            year = datetime.now(config.VN_TIMEZONE).year
+            
+            if not sales:
+                text = f"📅 BÁN HÀNG NGÀY {day}/{month}/{year}\n\n📭 Không có đơn hàng."
+            else:
+                total_revenue = sum(s['price'] for s in sales)
+                total_profit = sum(s['profit'] for s in sales)
+                
+                text = f"📅 BÁN HÀNG NGÀY {day}/{month}/{year}\n\n"
+                text += f"🛒 Số đơn: {len(sales)} | 💰 Thu: {format_currency(total_revenue)}\n"
+                text += f"📈 Lợi nhuận: {format_currency(total_profit)}\n\n"
+                
+                for i, s in enumerate(sales, 1):
+                    profit_emoji = "📈" if float(s['profit']) >= 0 else "📉"
+                    customer = s['customer'] or 'N/A'
+                    text += f"{i}. {s['sku']} x{s['quantity']}\n"
+                    text += f"   💰 {format_currency(s['price'])} | {profit_emoji} {format_currency(s['profit'])}\n"
+                    text += f"   👤 {customer}\n"
+            
+            keyboard = [
+                [InlineKeyboardButton("🔙 Về Tháng", callback_data="sales_profit")],
+                [InlineKeyboardButton("🔙 Menu Bán", callback_data="menu_ban")]
+            ]
+            await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            await safe_edit(query, f"❌ Lỗi: {str(e)}", get_back_keyboard())
     
     # Thống kê hôm nay
     elif data == "stats_today":
