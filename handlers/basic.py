@@ -294,19 +294,79 @@ Xem báo cáo thu chi và lợi nhuận:
             summary = sheets.get_month_expense_summary()
             month_name = get_month_name(summary['month'])
             
-            text = f"📊 *CHI TIÊU {month_name.upper()}/{summary['year']}*\n\n"
+            text = f"📊 CHI TIÊU {month_name.upper()}/{summary['year']}\n\n"
             text += f"📊 Số lần chi: {summary['count']}\n"
-            text += f"💸 *Tổng chi: {format_currency(summary['total'])}*\n\n"
+            text += f"💸 Tổng chi: {format_currency(summary['total'])}\n\n"
             
             if summary['by_category']:
-                text += "📂 *Theo loại:*\n"
+                text += "📂 Theo loại:\n"
                 for cat, total in summary['by_category'].items():
                     emoji = get_category_emoji(cat)
                     text += f"   {emoji} {cat}: {format_currency(total)}\n"
             
-            await safe_edit(query, text, get_expense_keyboard())
+            # Thêm chi tiêu theo ngày
+            if summary.get('by_day'):
+                text += "\n📅 Theo ngày:\n"
+                sorted_days = sorted(summary['by_day'].items())
+                for day, total in sorted_days:
+                    text += f"   • Ngày {day}: {format_currency(total)}\n"
+            
+            # Tạo keyboard với buttons cho từng ngày có chi tiêu
+            keyboard = []
+            if summary.get('by_day'):
+                days = sorted(summary['by_day'].keys())
+                row = []
+                for day in days:
+                    row.append(InlineKeyboardButton(
+                        f"📅 {day}", 
+                        callback_data=f"expense_day_{day}"
+                    ))
+                    if len(row) == 4:  # 4 buttons/hàng
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("🔙 Quay lại", callback_data="menu_chi")])
+            
+            await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
         except Exception as e:
-            await safe_edit(query, f"❌ Lỗi: `{str(e)}`", get_back_keyboard())
+            await safe_edit(query, f"❌ Lỗi: {str(e)}", get_back_keyboard())
+    
+    # Xem chi tiết chi tiêu theo ngày
+    elif data.startswith("expense_day_"):
+        from services import sheets
+        from utils.formatting import format_currency, get_category_emoji, get_month_name
+        
+        try:
+            day = int(data.replace("expense_day_", ""))
+            expenses = sheets.get_expenses_by_date(day)
+            
+            from datetime import datetime
+            import config
+            month = datetime.now(config.VN_TIMEZONE).month
+            year = datetime.now(config.VN_TIMEZONE).year
+            
+            if not expenses:
+                text = f"📅 CHI TIÊU NGÀY {day}/{month}/{year}\n\n📭 Không có chi tiêu."
+            else:
+                total = sum(e['amount'] for e in expenses)
+                text = f"📅 CHI TIÊU NGÀY {day}/{month}/{year}\n\n"
+                text += f"📊 Số lần: {len(expenses)} | 💸 Tổng: {format_currency(total)}\n\n"
+                
+                for i, e in enumerate(expenses, 1):
+                    emoji = get_category_emoji(e['category'])
+                    desc = e['description'] or 'N/A'
+                    text += f"{i}. {emoji} {format_currency(e['amount'])}\n"
+                    text += f"   📝 {desc}\n"
+            
+            keyboard = [
+                [InlineKeyboardButton("🔙 Về Tháng", callback_data="expense_month")],
+                [InlineKeyboardButton("🔙 Menu Chi", callback_data="menu_chi")]
+            ]
+            await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            await safe_edit(query, f"❌ Lỗi: {str(e)}", get_back_keyboard())
     
     # Xem danh sách sản phẩm
     elif data == "sanpham_list":

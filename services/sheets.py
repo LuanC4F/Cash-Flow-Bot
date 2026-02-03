@@ -438,6 +438,7 @@ def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
     total = 0
     count = 0
     by_category = {}
+    by_day = {}  # Thêm thống kê theo ngày
     
     for row in records:
         date_str = row.get('Date', '')
@@ -447,10 +448,12 @@ def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
                 if dt.month == month and dt.year == year:
                     amount = row.get('Amount', 0) or 0
                     category = row.get('Category', 'Other') or 'Other'
+                    day = dt.day
                     
                     total += amount
                     count += 1
                     by_category[category] = by_category.get(category, 0) + amount
+                    by_day[day] = by_day.get(day, 0) + amount
             except ValueError:
                 pass
     
@@ -459,8 +462,35 @@ def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
         'year': year,
         'count': count,
         'total': total,
-        'by_category': by_category
+        'by_category': by_category,
+        'by_day': by_day
     }
+
+
+def get_expenses_by_date(day: int, month: int = None, year: int = None) -> List[Dict]:
+    """Get expense details for a specific date"""
+    if month is None:
+        month = datetime.now(config.VN_TIMEZONE).month
+    if year is None:
+        year = datetime.now(config.VN_TIMEZONE).year
+    
+    target_date = f"{day:02d}/{month:02d}/{year}"
+    
+    sheet = get_client().worksheet(config.SHEET_EXPENSES)
+    records = sheet.get_all_records()
+    
+    expenses = []
+    for i, row in enumerate(records, start=2):
+        if row.get('Date', '') == target_date:
+            expenses.append({
+                'row': i,
+                'date': row.get('Date', ''),
+                'amount': row.get('Amount', 0),
+                'description': row.get('Description', ''),
+                'category': row.get('Category', '')
+            })
+    
+    return expenses
 
 
 def get_recent_expenses(limit: int = 10) -> List[Dict]:
