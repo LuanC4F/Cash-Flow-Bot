@@ -406,7 +406,6 @@ async def debt_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"""📊 TỔNG KẾT NỢ
 
 💰 Tổng nợ: {format_currency(summary['total_amount'])}
-📝 Số khoản: {summary['debt_count']}
 👥 Số người nợ: {summary['customer_count']}
 """
         
