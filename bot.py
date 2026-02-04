@@ -94,6 +94,36 @@ def run_flask():
     port = int(os.getenv('PORT', 10000))
     app.run(host='0.0.0.0', port=port, threaded=True)
 
+
+def self_ping():
+    """Tự ping chính mình mỗi 10 phút để giữ Render không spin down"""
+    import time
+    import requests
+    
+    # Đợi 30s để Flask khởi động xong
+    time.sleep(30)
+    
+    # Lấy URL từ RENDER_EXTERNAL_URL hoặc dùng localhost
+    render_url = os.getenv('RENDER_EXTERNAL_URL', '')
+    
+    while True:
+        try:
+            if render_url:
+                url = f"{render_url}/ping"
+                requests.get(url, timeout=30)
+                logger.info(f"✅ Self-ping successful: {url}")
+            else:
+                # Local development - ping localhost
+                port = int(os.getenv('PORT', 10000))
+                url = f"http://localhost:{port}/ping"
+                requests.get(url, timeout=10)
+        except Exception as e:
+            logger.warning(f"⚠️ Self-ping failed: {e}")
+        
+        # Ping mỗi 10 phút (600 giây)
+        time.sleep(600)
+
+
 # ==================== BẢO MẬT ====================
 # Thông báo khi không có quyền - Tùy chỉnh tại đây (dòng 79)
 UNAUTHORIZED_MESSAGE = "🚫 Bạn không có quyền sử dụng bot này."
@@ -169,6 +199,16 @@ def main():
     if not config.SHEET_ID:
         logger.error("❌ SHEET_ID không được tìm thấy trong file .env")
         return
+    
+    # Khởi động Flask server trong thread riêng
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info("🌐 Flask server started")
+    
+    # Khởi động self-ping thread để giữ Render không spin down
+    ping_thread = threading.Thread(target=self_ping, daemon=True)
+    ping_thread.start()
+    logger.info("🔄 Self-ping thread started")
     
     # Tạo application
     application = Application.builder().token(config.BOT_TOKEN).build()
@@ -362,16 +402,11 @@ def main():
     # Đăng ký error handler
     application.add_error_handler(error_handler)
     
-    # Chạy Flask server trong thread riêng (cho Render)
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info(f"🌐 Web server đang chạy trên port {os.getenv('PORT', 10000)}")
-    
     # Chạy bot
     logger.info("🚀 CashFlow Bot đang khởi động...")
     logger.info(f"📊 Sheet ID: {config.SHEET_ID[:20]}...")
-    logger.info("� Xóa các lệnh pending cũ...")
-    logger.info("�💡 Nhấn Ctrl+C để dừng bot")
+    logger.info("🧹 Xóa các lệnh pending cũ...")
+    logger.info("💡 Nhấn Ctrl+C để dừng bot")
     
     # drop_pending_updates=True: Xóa tất cả lệnh cũ trong hàng chờ khi bot khởi động
     application.run_polling(
