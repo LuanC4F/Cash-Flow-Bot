@@ -212,9 +212,37 @@ application.run_polling(
 )
 ```
 
-### 5.6. UptimeRobot
+### 5.5. Self-Ping để giữ Bot Alive
+```python
+def self_ping():
+    """Tự ping chính mình mỗi 10 phút để giữ Render không spin down"""
+    import time
+    import requests
+    
+    time.sleep(30)  # Đợi Flask khởi động
+    render_url = os.getenv('RENDER_EXTERNAL_URL', '')
+    
+    while True:
+        try:
+            if render_url:
+                requests.get(f"{render_url}/ping", timeout=30)
+                logger.info("✅ Self-ping successful")
+        except Exception as e:
+            logger.warning(f"⚠️ Self-ping failed: {e}")
+        
+        time.sleep(600)  # 10 phút
+
+# Khởi động trong main():
+ping_thread = threading.Thread(target=self_ping, daemon=True)
+ping_thread.start()
+```
+
+**Environment Variable cần thêm:**
+- `RENDER_EXTERNAL_URL` = `https://your-bot.onrender.com`
+
+### 5.6. UptimeRobot (Backup)
+- Vẫn nên dùng làm backup + nhận thông báo khi down
 - Tạo monitor HTTP(s) ping đến `/health` mỗi 5 phút
-- Giữ cho Render không spin-down
 
 ---
 
@@ -285,7 +313,35 @@ git remote add origin git@github.com:LuanC4F/repo-name.git
 
 ---
 
-## ⚠️ 9. LƯU Ý QUAN TRỌNG
+## 🎨 9. TÍNH NĂNG NÂNG CAO
+
+### 9.1. Thống kê theo ngày
+- Hiển thị doanh thu/chi tiêu theo từng ngày trong tháng
+- Function: `get_month_sales_summary()` trả về `by_day` dict
+- Buttons inline để chọn ngày xem chi tiết
+
+### 9.2. Xem/Sửa đơn hàng
+- Chi tiết đơn hàng theo row number
+- Sửa: số lượng, giá, người mua, ghi chú
+- Tự động tính lại lợi nhuận khi sửa
+
+### 9.3. Escape Markdown
+Khi hiển thị text người dùng nhập (customer, note):
+```python
+# Cách 1: Không dùng parse_mode (an toàn nhất)
+await message.reply_text(text, reply_markup=keyboard)
+
+# Cách 2: Escape ký tự đặc biệt
+def escape_markdown(text):
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+```
+
+---
+
+## ⚠️ 10. LƯU Ý QUAN TRỌNG
 
 1. **Không bao giờ** push `.env` hoặc `credentials.json` lên GitHub
 2. **Luôn test local** trước khi push lên Render
@@ -294,23 +350,29 @@ git remote add origin git@github.com:LuanC4F/repo-name.git
 5. **2 buttons/hàng** cho Inline Keyboard để không bị cắt chữ
 6. **Drop pending updates** khi bot khởi động lại
 7. **Health check endpoint** bắt buộc cho Render
+8. **Self-ping** để giữ Render không spin-down
+9. **Không dùng Markdown** cho user input (tránh lỗi parse)
+10. **Price = Tổng tiền thu** (không nhân qty khi tính doanh thu)
 
 ---
 
-## 🚀 10. CHECKLIST TRƯỚC KHI DEPLOY
+## 🚀 11. CHECKLIST TRƯỚC KHI DEPLOY
 
 - [ ] `.gitignore` có `.env` và `credentials.json`
 - [ ] `.env.example` đã tạo với template
 - [ ] `requirements.txt` đầy đủ dependencies
 - [ ] Flask health check endpoint đã thêm
 - [ ] `GOOGLE_CREDENTIALS` env đã cấu hình trên Render
+- [ ] `RENDER_EXTERNAL_URL` env đã cấu hình
 - [ ] Security check trong tất cả handlers
 - [ ] `drop_pending_updates=True` trong run_polling
 - [ ] Error handler xử lý Conflict
-- [ ] UptimeRobot đã cấu hình
+- [ ] Self-ping thread đã thêm
+- [ ] UptimeRobot đã cấu hình (backup)
 
 ---
 
 **Tạo bởi:** Antigravity AI Assistant  
-**Ngày:** 2026-02-01  
-**Version:** 1.0
+**Ngày cập nhật:** 2026-02-05  
+**Version:** 1.1
+

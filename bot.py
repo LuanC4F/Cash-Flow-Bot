@@ -57,6 +57,17 @@ from handlers.expense import (
     XOACHI_ROW
 )
 
+# Debt handlers
+from handlers.debt import (
+    no_command, 
+    ghino_start, ghino_customer, ghino_amount, ghino_note, ghino_skip_note,
+    debt_list, debt_by_customer, debt_customer_detail, debt_summary,
+    trano_start, trano_confirm, trano_all,
+    xoano_start, xoano_confirm,
+    cancel_debt,
+    NO_CUSTOMER, NO_AMOUNT, NO_NOTE, TRANO_SELECT, XOANO_SELECT
+)
+
 # Cấu hình logging - Chỉ hiển thị log quan trọng
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -358,6 +369,52 @@ def main():
         per_message=False,
     )
     
+    # ==================== DEBT CONVERSATIONS ====================
+    
+    # Ghi nợ mới
+    ghino_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(ghino_start, pattern="^debt_add$")],
+        states={
+            NO_CUSTOMER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_customer)],
+            NO_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_amount)],
+            NO_NOTE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_note),
+                CallbackQueryHandler(ghino_skip_note, pattern="^debt_skip_note$"),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
+            CommandHandler("cancel", cancel_debt),
+        ],
+        per_message=False,
+    )
+    
+    # Trả nợ
+    trano_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(trano_start, pattern="^debt_pay$")],
+        states={
+            TRANO_SELECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, trano_confirm)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
+            CommandHandler("cancel", cancel_debt),
+        ],
+        per_message=False,
+    )
+    
+    # Xóa nợ
+    xoano_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(xoano_start, pattern="^debt_delete$")],
+        states={
+            XOANO_SELECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, xoano_confirm)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
+            CommandHandler("cancel", cancel_debt),
+        ],
+        per_message=False,
+    )
+    
     # ==================== ĐĂNG KÝ HANDLERS ====================
     
     # Conversation handlers (phải đăng ký trước)
@@ -370,6 +427,9 @@ def main():
     application.add_handler(suabh_conv)
     application.add_handler(chi_conv)
     application.add_handler(xoachi_conv)
+    application.add_handler(ghino_conv)
+    application.add_handler(trano_conv)
+    application.add_handler(xoano_conv)
     
     # Basic commands
     application.add_handler(CommandHandler("start", start_command))
@@ -395,6 +455,16 @@ def main():
     application.add_handler(CommandHandler("homnay", homnay_command))
     application.add_handler(CommandHandler("thang", thang_command))
     application.add_handler(CommandHandler("xoachi", xoachi_command))
+    
+    # Debt commands
+    application.add_handler(CommandHandler("no", no_command))
+    
+    # Debt callback handlers (không thuộc conversation)
+    application.add_handler(CallbackQueryHandler(debt_list, pattern="^debt_list$"))
+    application.add_handler(CallbackQueryHandler(debt_by_customer, pattern="^debt_by_customer$"))
+    application.add_handler(CallbackQueryHandler(debt_customer_detail, pattern="^debt_customer_"))
+    application.add_handler(CallbackQueryHandler(trano_all, pattern="^debt_payall_"))
+    application.add_handler(CallbackQueryHandler(debt_summary, pattern="^debt_summary$"))
     
     # Handler cho lệnh không xác định
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))

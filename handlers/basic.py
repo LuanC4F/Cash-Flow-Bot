@@ -16,9 +16,10 @@ def get_main_menu_keyboard():
         ],
         [
             InlineKeyboardButton("📦 Sản Phẩm", callback_data="menu_sanpham"),
-            InlineKeyboardButton("📊 Thống Kê", callback_data="menu_thongke"),
+            InlineKeyboardButton("💳 Nợ Khách", callback_data="menu_no"),
         ],
         [
+            InlineKeyboardButton("📊 Thống Kê", callback_data="menu_thongke"),
             InlineKeyboardButton("❓ Hướng Dẫn", callback_data="menu_help"),
         ]
     ]
@@ -230,6 +231,16 @@ Bấm nút bên dưới để thao tác:
 Bấm nút bên dưới để thao tác:
 """
         await safe_edit(query, text, get_sales_keyboard())
+    
+    # Menu Nợ Khách
+    elif data == "menu_no":
+        from handlers.debt import get_debt_keyboard
+        text = """
+💳 *QUẢN LÝ NỢ*
+
+Bấm nút bên dưới để thao tác:
+"""
+        await safe_edit(query, text, get_debt_keyboard())
     
     # Menu Thống Kê
     elif data == "menu_thongke":

@@ -558,3 +558,119 @@ def delete_expense(row_num: int) -> bool:
         return True
     except Exception:
         return False
+
+
+# ==================== DEBT MANAGEMENT ====================
+
+def add_debt(customer: str, amount: float, note: str = "") -> Dict:
+    """Add new debt record"""
+    sheet = get_client().worksheet(config.SHEET_DEBTS)
+    date = get_local_date()
+    
+    row = [date, customer, amount, note, "pending", ""]
+    sheet.append_row(row, value_input_option='USER_ENTERED')
+    
+    return {
+        'date': date,
+        'customer': customer,
+        'amount': amount,
+        'note': note,
+        'status': 'pending'
+    }
+
+
+def get_all_debts(status: str = None) -> List[Dict]:
+    """Get all debts, optionally filter by status (pending/paid)"""
+    sheet = get_client().worksheet(config.SHEET_DEBTS)
+    records = sheet.get_all_records()
+    
+    debts = []
+    for i, row in enumerate(records, start=2):
+        debt_status = row.get('Status', 'pending')
+        if status is None or debt_status == status:
+            debts.append({
+                'row': i,
+                'date': row.get('Date', ''),
+                'customer': row.get('Customer', ''),
+                'amount': float(row.get('Amount', 0) or 0),
+                'note': row.get('Note', ''),
+                'status': debt_status,
+                'paid_date': row.get('PaidDate', '')
+            })
+    
+    return debts
+
+
+def get_debts_by_customer(customer: str) -> List[Dict]:
+    """Get all pending debts for a specific customer"""
+    all_debts = get_all_debts(status='pending')
+    return [d for d in all_debts if d['customer'].lower() == customer.lower()]
+
+
+def get_customer_total_debt(customer: str) -> float:
+    """Get total pending debt for a customer"""
+    debts = get_debts_by_customer(customer)
+    return sum(d['amount'] for d in debts)
+
+
+def get_all_customers_with_debt() -> List[Dict]:
+    """Get list of all customers with pending debt"""
+    debts = get_all_debts(status='pending')
+    
+    # Group by customer
+    customers = {}
+    for d in debts:
+        name = d['customer']
+        if name not in customers:
+            customers[name] = {'customer': name, 'total': 0, 'count': 0}
+        customers[name]['total'] += d['amount']
+        customers[name]['count'] += 1
+    
+    return list(customers.values())
+
+
+def mark_debt_paid(row_num: int) -> bool:
+    """Mark a debt as paid"""
+    try:
+        sheet = get_client().worksheet(config.SHEET_DEBTS)
+        paid_date = get_local_date()
+        # Column E = Status, Column F = PaidDate
+        sheet.update_cell(row_num, 5, 'paid')
+        sheet.update_cell(row_num, 6, paid_date)
+        return True
+    except Exception:
+        return False
+
+
+def mark_customer_debts_paid(customer: str) -> int:
+    """Mark all debts for a customer as paid, return count"""
+    debts = get_debts_by_customer(customer)
+    count = 0
+    for d in debts:
+        if mark_debt_paid(d['row']):
+            count += 1
+    return count
+
+
+def get_debt_summary() -> Dict:
+    """Get overall debt summary"""
+    debts = get_all_debts(status='pending')
+    
+    total_amount = sum(d['amount'] for d in debts)
+    customers = set(d['customer'] for d in debts)
+    
+    return {
+        'total_amount': total_amount,
+        'debt_count': len(debts),
+        'customer_count': len(customers)
+    }
+
+
+def delete_debt(row_num: int) -> bool:
+    """Delete debt by row number"""
+    try:
+        sheet = get_client().worksheet(config.SHEET_DEBTS)
+        sheet.delete_rows(row_num)
+        return True
+    except Exception:
+        return False
