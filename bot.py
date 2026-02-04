@@ -436,7 +436,14 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("menu", start_command))
     
-    # Callback handler cho inline buttons (menu navigation)
+    # Debt callback handlers (đăng ký TRƯỚC button_callback để pattern matching hoạt động)
+    application.add_handler(CallbackQueryHandler(debt_list, pattern="^debt_list$"))
+    application.add_handler(CallbackQueryHandler(debt_by_customer, pattern="^debt_by_customer$"))
+    application.add_handler(CallbackQueryHandler(debt_customer_detail, pattern="^debt_customer_"))
+    application.add_handler(CallbackQueryHandler(trano_all, pattern="^debt_payall_"))
+    application.add_handler(CallbackQueryHandler(debt_summary, pattern="^debt_summary$"))
+    
+    # Callback handler cho inline buttons (menu navigation) - Phải ở cuối vì không có pattern
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # Command handlers (backup mode)
@@ -458,13 +465,6 @@ def main():
     
     # Debt commands
     application.add_handler(CommandHandler("no", no_command))
-    
-    # Debt callback handlers (không thuộc conversation)
-    application.add_handler(CallbackQueryHandler(debt_list, pattern="^debt_list$"))
-    application.add_handler(CallbackQueryHandler(debt_by_customer, pattern="^debt_by_customer$"))
-    application.add_handler(CallbackQueryHandler(debt_customer_detail, pattern="^debt_customer_"))
-    application.add_handler(CallbackQueryHandler(trano_all, pattern="^debt_payall_"))
-    application.add_handler(CallbackQueryHandler(debt_summary, pattern="^debt_summary$"))
     
     # Handler cho lệnh không xác định
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
