@@ -136,44 +136,57 @@ ALLOWED_USER_ID=123456789
 
 ---
 
-## 🌐 5. DEPLOY TRÊN RENDER
+## 🌐 5. DEPLOY TRÊN RENDER (WEBHOOK MODE)
 
-### 5.1. Cấu hình cần thiết
+> ⚠️ **KHÔNG dùng Polling trên Render** - sẽ hết usage rất nhanh vì bot gọi API liên tục 24/7.
+> **Dùng Webhook** - Telegram chỉ gửi request khi có tin nhắn → gần như 0 usage khi không dùng.
+
+### 5.1. Cấu hình Render
 - **Service Type:** Web Service
 - **Build Command:** `pip install -r requirements.txt`
 - **Start Command:** `python bot.py`
 - **Environment Variables:**
-  - `BOT_TOKEN`
-  - `SHEET_ID`
-  - `ALLOWED_USER_ID`
-  - `GOOGLE_CREDENTIALS` (JSON string của credentials.json)
+  - `BOT_TOKEN` - Token từ @BotFather
+  - `SHEET_ID` - Google Sheet ID
+  - `ALLOWED_USER_ID` - Telegram User ID
+  - `GOOGLE_CREDENTIALS` - Toàn bộ nội dung file credentials.json (1 dòng JSON)
+  - `RENDER_EXTERNAL_URL` - URL service (ví dụ: `https://my-bot.onrender.com`)
 
-### 5.2. Web Server cho Health Check
-```python
-from flask import Flask, Response
-import threading
-import os
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return Response("Bot is running!", status=200, mimetype='text/plain')
-
-@app.route('/health')
-def health():
-    return Response("OK", status=200, mimetype='text/plain')
-
-def run_flask():
-    port = int(os.getenv('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, threaded=True)
-
-# Chạy Flask trong thread riêng trước khi chạy bot
-flask_thread = threading.Thread(target=run_flask, daemon=True)
-flask_thread.start()
+### 5.2. requirements.txt
+```txt
+python-telegram-bot[webhooks]>=20.0    # ← BẮT BUỘC có [webhooks]
+python-dotenv>=1.0.0
+gspread>=5.0.0
+google-auth>=2.0.0
+# KHÔNG cần flask!
 ```
 
-### 5.3. Google Credentials từ ENV
+### 5.3. Code Webhook (copy vào cuối bot.py)
+```python
+import os
+
+webhook_url = os.getenv('RENDER_EXTERNAL_URL', '')
+port = int(os.getenv('PORT', 10000))
+
+if webhook_url:
+    # ===== PRODUCTION: Webhook mode =====
+    application.run_webhook(
+        listen='0.0.0.0',
+        port=port,
+        url_path=BOT_TOKEN,                           # URL path = token (bảo mật)
+        webhook_url=f"{webhook_url}/{BOT_TOKEN}",      # Full URL webhook
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+    )
+else:
+    # ===== LOCAL: Polling mode =====
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
+```
+
+### 5.4. Google Credentials từ ENV
 ```python
 def get_client():
     google_creds_json = os.getenv('GOOGLE_CREDENTIALS')
@@ -187,7 +200,7 @@ def get_client():
         creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
 ```
 
-### 5.4. Xử lý lỗi Conflict
+### 5.5. Xử lý lỗi
 ```python
 async def error_handler(update, context):
     error_msg = str(context.error)
@@ -200,49 +213,30 @@ async def error_handler(update, context):
     if "NetworkError" in error_msg or "TimedOut" in error_msg:
         return
     
-    # Log và xử lý các lỗi khác
     logger.error(f"Error: {context.error}")
 ```
 
-### 5.5. Drop Pending Updates khi khởi động
-```python
-application.run_polling(
-    allowed_updates=Update.ALL_TYPES,
-    drop_pending_updates=True  # Xóa lệnh cũ trong queue
-)
-```
+### 5.6. Chuyển đổi Polling → Webhook (cho bot cũ)
 
-### 5.5. Self-Ping để giữ Bot Alive
-```python
-def self_ping():
-    """Tự ping chính mình mỗi 10 phút để giữ Render không spin down"""
-    import time
-    import requests
-    
-    time.sleep(30)  # Đợi Flask khởi động
-    render_url = os.getenv('RENDER_EXTERNAL_URL', '')
-    
-    while True:
-        try:
-            if render_url:
-                requests.get(f"{render_url}/ping", timeout=30)
-                logger.info("✅ Self-ping successful")
-        except Exception as e:
-            logger.warning(f"⚠️ Self-ping failed: {e}")
-        
-        time.sleep(600)  # 10 phút
+**4 bước duy nhất:**
 
-# Khởi động trong main():
-ping_thread = threading.Thread(target=self_ping, daemon=True)
-ping_thread.start()
-```
+| # | Thay đổi | Chi tiết |
+|---|----------|----------|
+| 1 | `requirements.txt` | Đổi `python-telegram-bot` → `python-telegram-bot[webhooks]`, bỏ `flask` |
+| 2 | `bot.py` cuối | Thay `run_polling()` → code webhook ở mục 5.3 |
+| 3 | `bot.py` đầu | Xóa `import threading`, `from flask import Flask`, xóa Flask app, routes, `run_flask()`, `self_ping()` |
+| 4 | Render ENV | Thêm `RENDER_EXTERNAL_URL` = URL service |
 
-**Environment Variable cần thêm:**
-- `RENDER_EXTERNAL_URL` = `https://your-bot.onrender.com`
+**So sánh Polling vs Webhook:**
 
-### 5.6. UptimeRobot (Backup)
-- Vẫn nên dùng làm backup + nhận thông báo khi down
-- Tạo monitor HTTP(s) ping đến `/health` mỗi 5 phút
+| | Polling | Webhook |
+|---|---------|---------|
+| Cách hoạt động | Bot liên tục hỏi Telegram "có tin nhắn mới?" | Telegram gửi đến bot khi có tin nhắn |
+| Usage trên Render | Rất cao (24/7) | Gần 0 khi không dùng |
+| Cold start | Không | ~20-30s lần đầu sau khi idle |
+| Cần Flask | ✅ | ❌ |
+| Cần UptimeRobot | ✅ | ❌ |
+| Cần self-ping | ✅ | ❌ |
 
 ---
 
@@ -349,10 +343,10 @@ def escape_markdown(text):
 4. **Convert data types** từ Google Sheets trước khi so sánh
 5. **2 buttons/hàng** cho Inline Keyboard để không bị cắt chữ
 6. **Drop pending updates** khi bot khởi động lại
-7. **Health check endpoint** bắt buộc cho Render
-8. **Self-ping** để giữ Render không spin-down
-9. **Không dùng Markdown** cho user input (tránh lỗi parse)
-10. **Price = Tổng tiền thu** (không nhân qty khi tính doanh thu)
+7. **Dùng Webhook** trên Render, KHÔNG dùng Polling (tốn usage)
+8. **Không dùng Markdown** cho user input (tránh lỗi parse)
+9. **Price = Tổng tiền thu** (không nhân qty khi tính doanh thu)
+10. **Cold start ~30s** là bình thường với Render free tier + Webhook
 
 ---
 
@@ -360,19 +354,18 @@ def escape_markdown(text):
 
 - [ ] `.gitignore` có `.env` và `credentials.json`
 - [ ] `.env.example` đã tạo với template
-- [ ] `requirements.txt` đầy đủ dependencies
-- [ ] Flask health check endpoint đã thêm
+- [ ] `requirements.txt` có `python-telegram-bot[webhooks]`
 - [ ] `GOOGLE_CREDENTIALS` env đã cấu hình trên Render
 - [ ] `RENDER_EXTERNAL_URL` env đã cấu hình
 - [ ] Security check trong tất cả handlers
-- [ ] `drop_pending_updates=True` trong run_polling
+- [ ] `drop_pending_updates=True`
 - [ ] Error handler xử lý Conflict
-- [ ] Self-ping thread đã thêm
-- [ ] UptimeRobot đã cấu hình (backup)
+- [ ] Code webhook (mục 5.3) đã thêm vào bot.py
 
 ---
 
 **Tạo bởi:** Antigravity AI Assistant  
-**Ngày cập nhật:** 2026-02-05  
-**Version:** 1.1
+**Ngày cập nhật:** 2026-02-15  
+**Version:** 2.0 (Webhook mode)
+
 
