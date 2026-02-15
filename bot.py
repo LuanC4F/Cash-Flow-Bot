@@ -5,8 +5,6 @@ Main entry point
 
 import os
 import logging
-import threading
-from flask import Flask
 from telegram import Update
 from telegram.ext import (
     Application, 
@@ -81,58 +79,7 @@ logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-# ==================== FLASK WEB SERVER ====================
-# Cần thiết cho Render để bind port và UptimeRobot
-app = Flask(__name__)
 
-@app.route('/')
-def home():
-    from flask import Response
-    return Response("CashFlow Bot is running!", status=200, mimetype='text/plain')
-
-@app.route('/health')
-def health():
-    from flask import Response
-    return Response("OK", status=200, mimetype='text/plain')
-
-@app.route('/ping')
-def ping():
-    from flask import Response
-    return Response("pong", status=200, mimetype='text/plain')
-
-def run_flask():
-    """Chạy Flask server trong thread riêng"""
-    port = int(os.getenv('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, threaded=True)
-
-
-def self_ping():
-    """Tự ping chính mình mỗi 10 phút để giữ Render không spin down"""
-    import time
-    import requests
-    
-    # Đợi 30s để Flask khởi động xong
-    time.sleep(30)
-    
-    # Lấy URL từ RENDER_EXTERNAL_URL hoặc dùng localhost
-    render_url = os.getenv('RENDER_EXTERNAL_URL', '')
-    
-    while True:
-        try:
-            if render_url:
-                url = f"{render_url}/ping"
-                requests.get(url, timeout=30)
-                logger.info(f"✅ Self-ping successful: {url}")
-            else:
-                # Local development - ping localhost
-                port = int(os.getenv('PORT', 10000))
-                url = f"http://localhost:{port}/ping"
-                requests.get(url, timeout=10)
-        except Exception as e:
-            logger.warning(f"⚠️ Self-ping failed: {e}")
-        
-        # Ping mỗi 10 phút (600 giây)
-        time.sleep(600)
 
 
 # ==================== BẢO MẬT ====================
@@ -210,16 +157,6 @@ def main():
     if not config.SHEET_ID:
         logger.error("❌ SHEET_ID không được tìm thấy trong file .env")
         return
-    
-    # Khởi động Flask server trong thread riêng
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info("🌐 Flask server started")
-    
-    # Khởi động self-ping thread để giữ Render không spin down
-    ping_thread = threading.Thread(target=self_ping, daemon=True)
-    ping_thread.start()
-    logger.info("🔄 Self-ping thread started")
     
     # Tạo application
     application = Application.builder().token(config.BOT_TOKEN).build()
@@ -475,14 +412,30 @@ def main():
     # Chạy bot
     logger.info("🚀 CashFlow Bot đang khởi động...")
     logger.info(f"📊 Sheet ID: {config.SHEET_ID[:20]}...")
-    logger.info("🧹 Xóa các lệnh pending cũ...")
-    logger.info("💡 Nhấn Ctrl+C để dừng bot")
     
-    # drop_pending_updates=True: Xóa tất cả lệnh cũ trong hàng chờ khi bot khởi động
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True
-    )
+    # Lấy URL webhook từ env (Render tự set RENDER_EXTERNAL_URL)
+    webhook_url = os.getenv('RENDER_EXTERNAL_URL', '')
+    port = int(os.getenv('PORT', 10000))
+    
+    if webhook_url:
+        # ===== PRODUCTION: Webhook mode =====
+        logger.info(f"🌐 Webhook mode: {webhook_url}")
+        application.run_webhook(
+            listen='0.0.0.0',
+            port=port,
+            url_path=config.BOT_TOKEN,
+            webhook_url=f"{webhook_url}/{config.BOT_TOKEN}",
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        # ===== LOCAL: Polling mode =====
+        logger.info("🔄 Polling mode (local development)")
+        logger.info("💡 Nhấn Ctrl+C để dừng bot")
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
 
 
 if __name__ == "__main__":
