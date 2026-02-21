@@ -58,12 +58,39 @@ def get_local_date() -> str:
     return datetime.now(config.VN_TIMEZONE).strftime('%d/%m/%Y')
 
 
+def safe_get_records(sheet) -> List[Dict]:
+    """Get all records an toàn - xử lý header trùng/rỗng"""
+    try:
+        return sheet.get_all_records()
+    except Exception:
+        # Fallback: đọc thủ công khi header có vấn đề
+        all_values = sheet.get_all_values()
+        if not all_values or len(all_values) < 2:
+            return []
+        
+        headers = all_values[0]
+        # Lọc bỏ header rỗng, chỉ giữ cột có header
+        valid_cols = [i for i, h in enumerate(headers) if h.strip()]
+        clean_headers = [headers[i] for i in valid_cols]
+        
+        records = []
+        for row in all_values[1:]:
+            record = {}
+            for idx, col_idx in enumerate(valid_cols):
+                if col_idx < len(row):
+                    record[clean_headers[idx]] = row[col_idx]
+                else:
+                    record[clean_headers[idx]] = ''
+            records.append(record)
+        return records
+
+
 # ==================== PRODUCTS ====================
 
 def get_all_products() -> List[Dict]:
     """Get all products"""
     sheet = get_client().worksheet(config.SHEET_PRODUCTS)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     products = []
     for i, row in enumerate(records, start=2):  # start=2 because row 1 is header
@@ -187,7 +214,7 @@ def add_sale(sku: str, quantity: int, price: float, cost: float,
 def get_today_sales() -> List[Dict]:
     """Get today's sales"""
     sheet = get_client().worksheet(config.SHEET_SALES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     today = get_local_date()
     sales = []
@@ -233,7 +260,7 @@ def get_month_sales_summary(month: int = None, year: int = None) -> Dict:
         year = datetime.now(config.VN_TIMEZONE).year
     
     sheet = get_client().worksheet(config.SHEET_SALES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     total_revenue = 0
     total_profit = 0
@@ -287,7 +314,7 @@ def get_sales_by_date(day: int, month: int = None, year: int = None) -> List[Dic
     target_date = f"{day:02d}/{month:02d}/{year}"
     
     sheet = get_client().worksheet(config.SHEET_SALES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     sales = []
     for i, row in enumerate(records, start=2):
@@ -309,7 +336,7 @@ def get_sales_by_date(day: int, month: int = None, year: int = None) -> List[Dic
 def get_recent_sales(limit: int = 10) -> List[Dict]:
     """Get recent sales"""
     sheet = get_client().worksheet(config.SHEET_SALES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     sales = []
     for i, row in enumerate(records, start=2):
@@ -427,7 +454,7 @@ def add_expense(amount: float, description: str, category: str = "Living") -> Di
 def get_today_expenses() -> List[Dict]:
     """Get today's expenses"""
     sheet = get_client().worksheet(config.SHEET_EXPENSES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     today = get_local_date()
     expenses = []
@@ -472,7 +499,7 @@ def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
         year = datetime.now(config.VN_TIMEZONE).year
     
     sheet = get_client().worksheet(config.SHEET_EXPENSES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     total = 0
     count = 0
@@ -516,7 +543,7 @@ def get_expenses_by_date(day: int, month: int = None, year: int = None) -> List[
     target_date = f"{day:02d}/{month:02d}/{year}"
     
     sheet = get_client().worksheet(config.SHEET_EXPENSES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     expenses = []
     for i, row in enumerate(records, start=2):
@@ -535,7 +562,7 @@ def get_expenses_by_date(day: int, month: int = None, year: int = None) -> List[
 def get_recent_expenses(limit: int = 10) -> List[Dict]:
     """Get recent expenses"""
     sheet = get_client().worksheet(config.SHEET_EXPENSES)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     expenses = []
     for i, row in enumerate(records, start=2):
@@ -582,7 +609,7 @@ def add_debt(customer: str, amount: float, note: str = "") -> Dict:
 def get_all_debts(status: str = None) -> List[Dict]:
     """Get all debts, optionally filter by status (pending/paid)"""
     sheet = get_client().worksheet(config.SHEET_DEBTS)
-    records = sheet.get_all_records()
+    records = safe_get_records(sheet)
     
     debts = []
     for i, row in enumerate(records, start=2):
