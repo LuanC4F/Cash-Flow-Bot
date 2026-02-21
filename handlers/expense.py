@@ -153,23 +153,21 @@ async def chi_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         emoji = get_category_emoji(category)
         
-        text = f"""
-✅ *ĐÃ GHI CHI TIÊU!*
+        text = f"""✅ ĐÃ GHI CHI TIÊU!
 
-💸 *Số tiền:* {format_currency(amount)}
-📝 *Mô tả:* {description}
-{emoji} *Loại:* {category}
-📅 *Ngày:* {result['date']}
+💸 Số tiền: {format_currency(amount)}
+📝 Mô tả: {description}
+{emoji} Loại: {category}
+📅 Ngày: {result['date']}
 """
         
         # Thêm tổng chi hôm nay
         today_summary = sheets.get_today_expense_summary()
-        text += f"\n━━━ *Chi tiêu hôm nay* ━━━\n"
+        text += f"━━━ Chi tiêu hôm nay ━━━\n"
         text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
         
         await update.message.reply_text(
             text,
-            parse_mode='Markdown',
             reply_markup=get_expense_keyboard()
         )
         
@@ -324,18 +322,18 @@ async def chitieu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         date = sheets.get_local_date()
         
         if not expenses:
-            text = f"💸 *CHI TIÊU - {date}*\n\n📭 Chưa có chi tiêu nào hôm nay."
+            text = f"💸 CHI TIÊU - {date}\n\n📭 Chưa có chi tiêu nào hôm nay."
         else:
-            text = f"💸 *CHI TIÊU - {date}*\n\n"
+            text = f"💸 CHI TIÊU - {date}\n\n"
             for e in expenses:
                 emoji = get_category_emoji(e['category'])
-                text += f"{emoji} *Row {e['row']}*: {format_currency(e['amount'])}\n"
+                text += f"{emoji} Row {e['row']}: {format_currency(e['amount'])}\n"
                 text += f"   📝 {e['description']}\n\n"
             
             text += f"━━━━━━━━━━━━━━━━━\n"
-            text += f"💸 *Tổng chi: {format_currency(summary['total'])}*"
+            text += f"💸 Tổng chi: {format_currency(summary['total'])}"
         
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=get_expense_keyboard())
+        await update.message.reply_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
 
@@ -350,15 +348,15 @@ async def homnay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         balance = sales_summary['total_profit'] - expense_summary['total']
         balance_emoji = "📈" if balance >= 0 else "📉"
         
-        text = f"📊 *TỔNG KẾT {date}*\n\n"
-        text += f"━━━ *💰 Thu nhập* ━━━\n"
+        text = f"📊 TỔNG KẾT {date}\n\n"
+        text += f"━━━ 💰 Thu nhập ━━━\n"
         text += f"🛒 Bán: {sales_summary['sale_count']} | 📈 Lãi: {format_currency(sales_summary['total_profit'])}\n\n"
-        text += f"━━━ *💸 Chi tiêu* ━━━\n"
+        text += f"━━━ 💸 Chi tiêu ━━━\n"
         text += f"📊 Số lần: {expense_summary['count']} | 💸 Tổng: {format_currency(expense_summary['total'])}\n\n"
         text += f"━━━━━━━━━━━━━━━━━\n"
-        text += f"{balance_emoji} *Còn lại: {format_currency(balance)}*"
+        text += f"{balance_emoji} Còn lại: {format_currency(balance)}"
         
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=get_expense_keyboard())
+        await update.message.reply_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
 
@@ -373,16 +371,16 @@ async def thang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         balance = sales_summary['total_profit'] - expense_summary['total']
         balance_emoji = "📈" if balance >= 0 else "📉"
         
-        text = f"📅 *TỔNG KẾT {month_name.upper()}/{expense_summary['year']}*\n\n"
-        text += f"━━━ *💰 Thu nhập* ━━━\n"
+        text = f"📅 TỔNG KẾT {month_name.upper()}/{expense_summary['year']}\n\n"
+        text += f"━━━ 💰 Thu nhập ━━━\n"
         text += f"🛒 Bán: {sales_summary['sale_count']} | Doanh thu: {format_currency(sales_summary['total_revenue'])}\n"
         text += f"📈 Lợi nhuận: {format_currency(sales_summary['total_profit'])}\n\n"
-        text += f"━━━ *💸 Chi tiêu* ━━━\n"
+        text += f"━━━ 💸 Chi tiêu ━━━\n"
         text += f"📊 Số lần: {expense_summary['count']} | 💸 Tổng: {format_currency(expense_summary['total'])}\n\n"
         text += f"━━━━━━━━━━━━━━━━━\n"
-        text += f"{balance_emoji} *Còn lại: {format_currency(balance)}*"
+        text += f"{balance_emoji} Còn lại: {format_currency(balance)}"
         
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=get_expense_keyboard())
+        await update.message.reply_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
 
