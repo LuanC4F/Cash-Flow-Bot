@@ -106,12 +106,17 @@ def get_back_keyboard():
 
 
 async def safe_edit(query, text, reply_markup=None):
-    """Edit message an toàn - bỏ qua lỗi 'message not modified'"""
+    """Edit message an toàn - fallback không Markdown nếu parse lỗi"""
     try:
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     except BadRequest as e:
         if "Message is not modified" not in str(e):
-            raise e
+            # Thử lại không Markdown nếu do ký tự đặc biệt
+            try:
+                clean_text = text.replace('*', '').replace('_', '').replace('`', '')
+                await query.edit_message_text(clean_text, reply_markup=reply_markup)
+            except Exception:
+                raise e
 
 # Import bảo mật từ utils/security.py
 # Tùy chỉnh thông báo tại: utils/security.py, dòng 11
