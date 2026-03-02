@@ -60,6 +60,7 @@ from handlers.expense import (
 from handlers.debt import (
     no_command, 
     ghino_start, ghino_customer, ghino_amount, ghino_note, ghino_skip_note,
+    ghino_select_customer,
     debt_list, debt_by_customer, debt_customer_detail, debt_summary,
     trano_start, trano_confirm, trano_all,
     xoano_start, xoano_confirm,
@@ -335,7 +336,10 @@ def main():
     ghino_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(ghino_start, pattern="^debt_add$")],
         states={
-            NO_CUSTOMER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_customer)],
+            NO_CUSTOMER: [
+                CallbackQueryHandler(ghino_select_customer, pattern="^debt_addto_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_customer),
+            ],
             NO_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_amount)],
             NO_NOTE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_note),
