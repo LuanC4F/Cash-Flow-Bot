@@ -423,28 +423,41 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
         sent = False
         
         if qr_url:
-            import urllib.request
-            import io
-            
+            # Cách 1: Gửi URL trực tiếp cho Telegram tải
             try:
-                # Tải ảnh QR về bytes
-                req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    qr_bytes = io.BytesIO(resp.read())
-                    qr_bytes.name = 'qr_payment.png'
-                
                 await context.bot.send_photo(
                     chat_id=chat_id,
-                    photo=qr_bytes,
+                    photo=qr_url,
                     caption=caption,
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 sent = True
             except Exception:
                 pass
+            
+            # Cách 2: Tự tải về bytes rồi gửi
+            if not sent:
+                try:
+                    import urllib.request
+                    import io
+                    
+                    req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        qr_bytes = io.BytesIO(resp.read())
+                        qr_bytes.name = 'qr_payment.png'
+                    
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=qr_bytes,
+                        caption=caption,
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                    sent = True
+                except Exception:
+                    pass
         
         if not sent:
-            # Fallback: gửi link nếu không có QR hoặc tải lỗi
+            # Cách 3: Gửi link text
             caption += f"\n\n🔗 Link: {checkout_url}"
             await context.bot.send_message(
                 chat_id=chat_id,

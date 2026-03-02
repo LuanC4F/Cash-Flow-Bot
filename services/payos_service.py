@@ -76,7 +76,7 @@ def create_payment_link(customer: str, amount: int, description: str = "") -> di
     if not qr_code:
         import urllib.parse
         encoded_url = urllib.parse.quote(checkout_url, safe='')
-        qr_code = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={encoded_url}"
+        qr_code = f"https://quickchart.io/qr?text={encoded_url}&size=400"
     
     return {
         'order_code': order_code,
