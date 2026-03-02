@@ -349,6 +349,9 @@ async def debt_customer_detail(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if not debts:
             text = f"👤 NỢ CỦA: {customer}\n\n🎉 Đã trả hết!"
+            keyboard = [
+                [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
+            ]
         else:
             total = sum(d['amount'] for d in debts)
             text = f"👤 NỢ CỦA: {customer}\n\n"
@@ -358,15 +361,148 @@ async def debt_customer_detail(update: Update, context: ContextTypes.DEFAULT_TYP
                 text += f"• {d['date']}: {format_currency(d['amount'])}{note_text}\n"
             
             text += f"\n━━━━━━━━━━━━━━━━━\n💰 Tổng nợ: {format_currency(total)}"
-        
-        keyboard = [
-            [InlineKeyboardButton(f"✅ Trả Hết Nợ ({customer})", callback_data=f"debt_payall_{customer[:15]}")],
-            [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
-        ]
+            
+            keyboard = [
+                [InlineKeyboardButton(f"💳 Tạo Link TT ({format_currency(total)})", callback_data=f"debt_paylink_{customer[:15]}")],
+                [InlineKeyboardButton(f"✅ Trả Hết Nợ ({customer})", callback_data=f"debt_payall_{customer[:15]}")],
+                [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
+            ]
         
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
         await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_back_keyboard())
+
+
+# ==================== PAYOS THANH TOÁN ====================
+
+async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tạo QR thanh toán PayOS cho khách"""
+    query = update.callback_query
+    await query.answer()
+    
+    customer = query.data.replace("debt_paylink_", "")
+    
+    try:
+        from services.payos_service import create_payment_link
+        
+        # Lấy tổng nợ
+        total = sheets.get_customer_total_debt(customer)
+        
+        if total <= 0:
+            await query.edit_message_text(
+                f"🎉 {customer} không còn nợ!",
+                reply_markup=get_debt_keyboard()
+            )
+            return
+        
+        # Thông báo đang tạo
+        await query.edit_message_text("⏳ Đang tạo QR thanh toán...")
+        
+        # Tạo link PayOS
+        result = create_payment_link(customer, total, f"Tra no - {customer}")
+        
+        # Lưu order_code để kiểm tra sau
+        context.user_data['payos_order'] = result['order_code']
+        context.user_data['payos_customer'] = customer
+        
+        caption = f"""💳 QR THANH TOÁN
+
+👤 Khách: {customer}
+💰 Số tiền: {format_currency(total)}
+📋 Mã đơn: {result['order_code']}
+
+💡 Gửi QR này cho khách quét để thanh toán.
+Sau khi thanh toán xong, bấm Kiểm Tra bên dưới."""
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"debt_checkpay_{result['order_code']}")],
+            [InlineKeyboardButton(f"👤 Quay lại {customer}", callback_data=f"debt_customer_{customer[:15]}")],
+            [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
+        ]
+        
+        # Gửi ảnh QR code
+        qr_url = result.get('qr_code', '')
+        chat_id = query.message.chat_id
+        
+        if qr_url:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=qr_url,
+                caption=caption,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            # Fallback: gửi link nếu không có QR
+            caption += f"\n\n🔗 Link: {result['checkout_url']}"
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=caption,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    except Exception as e:
+        await query.edit_message_text(f"❌ Lỗi tạo QR: {str(e)}", reply_markup=get_back_keyboard())
+
+
+async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kiểm tra trạng thái thanh toán PayOS"""
+    query = update.callback_query
+    await query.answer()
+    
+    order_code_str = query.data.replace("debt_checkpay_", "")
+    
+    try:
+        from services.payos_service import check_payment_status
+        
+        order_code = int(order_code_str)
+        result = check_payment_status(order_code)
+        
+        customer = context.user_data.get('payos_customer', '')
+        
+        if result['status'] == 'PAID':
+            # Tự động đánh dấu tất cả nợ đã trả
+            count = sheets.mark_customer_debts_paid(customer)
+            
+            text = f"""✅ ĐÃ THANH TOÁN THÀNH CÔNG!
+
+👤 Khách: {customer}
+💰 Số tiền: {format_currency(result['amount'])}
+📋 Mã đơn: {order_code}
+
+🎉 Đã tự động đánh dấu {count} khoản nợ đã trả!"""
+            
+            context.user_data.pop('payos_order', None)
+            context.user_data.pop('payos_customer', None)
+            
+            await query.edit_message_text(text, reply_markup=get_debt_keyboard())
+        
+        elif result['status'] == 'CANCELLED':
+            text = f"❌ Thanh toán đã bị HỦY!\n\nMã đơn: {order_code}"
+            
+            keyboard = [
+                [InlineKeyboardButton(f"💳 Tạo Link Mới", callback_data=f"debt_paylink_{customer[:15]}")],
+                [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
+            ]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        
+        else:
+            # PENDING
+            text = f"""⏳ CHƯA THANH TOÁN
+
+👤 Khách: {customer}
+📋 Mã đơn: {order_code}
+📊 Trạng thái: Đang chờ thanh toán
+
+💡 Gửi link cho khách và bấm Kiểm Tra lại sau."""
+            
+            keyboard = [
+                [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data=f"debt_checkpay_{order_code}")],
+                [InlineKeyboardButton(f"👤 Quay lại {customer}", callback_data=f"debt_customer_{customer[:15]}")],
+                [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
+            ]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    except Exception as e:
+        await query.edit_message_text(f"❌ Lỗi kiểm tra: {str(e)}", reply_markup=get_back_keyboard())
 
 
 # ==================== TRẢ NỢ ====================

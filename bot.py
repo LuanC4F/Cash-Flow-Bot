@@ -62,6 +62,7 @@ from handlers.debt import (
     ghino_start, ghino_customer, ghino_amount, ghino_note, ghino_skip_note,
     ghino_select_customer,
     debt_list, debt_by_customer, debt_customer_detail, debt_summary,
+    debt_create_paylink, debt_check_payment,
     trano_start, trano_confirm, trano_all,
     xoano_start, xoano_confirm,
     cancel_debt,
@@ -404,6 +405,8 @@ def main():
     application.add_handler(CallbackQueryHandler(debt_list, pattern="^debt_list$"))
     application.add_handler(CallbackQueryHandler(debt_by_customer, pattern="^debt_by_customer$"))
     application.add_handler(CallbackQueryHandler(debt_customer_detail, pattern="^debt_customer_"))
+    application.add_handler(CallbackQueryHandler(debt_create_paylink, pattern="^debt_paylink_"))
+    application.add_handler(CallbackQueryHandler(debt_check_payment, pattern="^debt_checkpay_"))
     application.add_handler(CallbackQueryHandler(trano_all, pattern="^debt_payall_"))
     application.add_handler(CallbackQueryHandler(debt_summary, pattern="^debt_summary$"))
     
