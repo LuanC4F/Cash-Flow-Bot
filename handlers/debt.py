@@ -405,24 +405,22 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['payos_order'] = result['order_code']
         context.user_data['payos_customer'] = customer
         
-        caption = f"""💳 QR THANH TOÁN
-
-👤 Khách: {customer}
-💰 Số tiền: {format_currency(total)}
-📋 Mã đơn: {result['order_code']}
-
-💡 Gửi QR này cho khách quét để thanh toán.
-Sau khi thanh toán xong, bấm Kiểm Tra bên dưới."""
+        caption = f"🧾 ĐƠN HÀNG: {result['order_code']}\n"
+        caption += f"👤 {customer}\n"
+        caption += f"💰 {format_currency(total)}"
         
         keyboard = [
+            [InlineKeyboardButton("🏦 APP NGÂN HÀNG", url=result['checkout_url'])],
             [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"debt_checkpay_{result['order_code']}")],
-            [InlineKeyboardButton(f"👤 Quay lại {customer}", callback_data=f"debt_customer_{customer[:15]}")],
-            [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
+            [InlineKeyboardButton("❌ Hủy đơn", callback_data=f"debt_customer_{customer[:15]}")],
         ]
         
         # Gửi ảnh QR code
         qr_url = result.get('qr_code', '')
+        checkout_url = result.get('checkout_url', '')
         chat_id = query.message.chat_id
+        
+        sent = False
         
         if qr_url:
             import urllib.request
@@ -441,17 +439,13 @@ Sau khi thanh toán xong, bấm Kiểm Tra bên dưới."""
                     caption=caption,
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
+                sent = True
             except Exception:
-                # Fallback: gửi link nếu tải QR lỗi
-                caption += f"\n\n🔗 Link: {result['checkout_url']}"
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=caption,
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-        else:
-            # Fallback: gửi link nếu không có QR
-            caption += f"\n\n🔗 Link: {result['checkout_url']}"
+                pass
+        
+        if not sent:
+            # Fallback: gửi link nếu không có QR hoặc tải lỗi
+            caption += f"\n\n🔗 Link: {checkout_url}"
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=caption,
