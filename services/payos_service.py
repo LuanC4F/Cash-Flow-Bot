@@ -62,7 +62,7 @@ def create_payment_link(customer: str, amount: int, description: str = "") -> di
         )
     )
     
-    # Lấy QR code URL
+    # Lấy QR code URL từ PayOS response
     qr_code = ''
     for attr in ['qr_code', 'qrCode', 'qr']:
         if hasattr(response, attr):
@@ -70,9 +70,17 @@ def create_payment_link(customer: str, amount: int, description: str = "") -> di
             if qr_code:
                 break
     
+    checkout_url = response.checkout_url
+    
+    # Nếu PayOS không trả QR → tự tạo từ checkout URL
+    if not qr_code:
+        import urllib.parse
+        encoded_url = urllib.parse.quote(checkout_url, safe='')
+        qr_code = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={encoded_url}"
+    
     return {
         'order_code': order_code,
-        'checkout_url': response.checkout_url,
+        'checkout_url': checkout_url,
         'qr_code': qr_code,
     }
 
