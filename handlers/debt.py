@@ -425,12 +425,30 @@ Sau khi thanh toán xong, bấm Kiểm Tra bên dưới."""
         chat_id = query.message.chat_id
         
         if qr_url:
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=qr_url,
-                caption=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            import urllib.request
+            import io
+            
+            try:
+                # Tải ảnh QR về bytes
+                req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    qr_bytes = io.BytesIO(resp.read())
+                    qr_bytes.name = 'qr_payment.png'
+                
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=qr_bytes,
+                    caption=caption,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            except Exception:
+                # Fallback: gửi link nếu tải QR lỗi
+                caption += f"\n\n🔗 Link: {result['checkout_url']}"
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=caption,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
         else:
             # Fallback: gửi link nếu không có QR
             caption += f"\n\n🔗 Link: {result['checkout_url']}"
