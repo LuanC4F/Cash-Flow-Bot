@@ -1,0 +1,545 @@
+# 🏦 Hướng Dẫn Tích Hợp PayOS Cho Telegram Bot
+
+> Guideline này được trích xuất từ bot **Telegram_Sepay_Bot**, hướng dẫn bạn cách tích hợp PayOS vào bất kỳ bot Telegram Python nào.
+
+---
+
+## 📋 Mục Lục
+
+1. [Tổng Quan Kiến Trúc](#1-tổng-quan-kiến-trúc)
+2. [Đăng Ký Tài Khoản PayOS](#2-đăng-ký-tài-khoản-payos)
+3. [Cấu Hình Environment Variables](#3-cấu-hình-environment-variables)
+4. [Cài Đặt Dependencies](#4-cài-đặt-dependencies)
+5. [Tạo PayOS Service](#5-tạo-payos-service)
+6. [Tạo Payment Link & Hiển Thị QR Code](#6-tạo-payment-link--hiển-thị-qr-code)
+7. [Webhook Server - Nhận Thông Báo Thanh Toán](#7-webhook-server---nhận-thông-báo-thanh-toán)
+8. [Cấu Hình Webhook Trên PayOS Dashboard](#8-cấu-hình-webhook-trên-payos-dashboard)
+9. [Flow Hoàn Chỉnh](#9-flow-hoàn-chỉnh)
+10. [Checklist Triển Khai](#10-checklist-triển-khai)
+
+---
+
+## 1. Tổng Quan Kiến Trúc
+
+```mermaid
+sequenceDiagram
+    participant User as 👤 User (Telegram)
+    participant Bot as 🤖 Telegram Bot
+    participant PayOS as 🏦 PayOS API
+    participant Webhook as 🔗 Webhook Server
+    
+    User->>Bot: /start → Chọn sản phẩm & số lượng
+    Bot->>PayOS: Tạo Payment Link (API)
+    PayOS-->>Bot: Trả về checkoutUrl, QR info
+    Bot-->>User: Gửi QR Code + Link thanh toán
+    User->>PayOS: Quét QR / Mở link → Thanh toán
+    PayOS->>Webhook: POST /payos/webhook (payment confirmed)
+    Webhook->>Webhook: Verify signature → Xử lý đơn hàng
+```
+
+### Các file cần tạo:
+
+| File | Mô tả |
+|------|--------|
+| [payos_service.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/payos_service.py) | Class xử lý tạo payment link + verify webhook |
+| [webhook_server.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/webhook_server.py) | FastAPI server nhận callback từ PayOS |
+| [.env](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/.env) | Chứa các key PayOS |
+
+---
+
+## 2. Đăng Ký Tài Khoản PayOS
+
+1. Truy cập [https://payos.vn](https://payos.vn) → Đăng ký tài khoản
+2. Vào **Dashboard** → **Channels** → Tạo một **channel** mới (ứng dụng)
+3. Lấy **3 giá trị quan trọng** từ channel vừa tạo:
+   - **Client ID** — định danh ứng dụng
+   - **API Key** — key để gọi API
+   - **Checksum Key** — key để tạo/verify chữ ký (signature)
+
+> [!IMPORTANT]
+> Không bao giờ share 3 key này ra ngoài. Luôn lưu trong [.env](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/.env) file.
+
+---
+
+## 3. Cấu Hình Environment Variables
+
+Thêm 3 biến sau vào file [.env](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/.env):
+
+```env
+# PayOS credentials
+PAYOS_CLIENT_ID=your_client_id_here
+PAYOS_API_KEY=your_api_key_here
+PAYOS_CHECKSUM_KEY=your_checksum_key_here
+```
+
+> [!NOTE]
+> - `CLIENT_ID` có dạng UUID: `2c56c159-720e-40cd-aef3-9ce4408c3b24`
+> - `API_KEY` có dạng UUID: `70566a91-edbc-4421-a517-30a419134134`
+> - `CHECKSUM_KEY` có dạng hash dài: `ad1f1d78e8fad9dd50b9d6452191026a...`
+
+---
+
+## 4. Cài Đặt Dependencies
+
+```bash
+pip install requests python-dotenv fastapi uvicorn
+```
+
+| Package | Mục đích |
+|---------|----------|
+| `requests` | Gọi PayOS REST API |
+| `python-dotenv` | Đọc [.env](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/.env) file |
+| `fastapi` | Webhook server |
+| `uvicorn` | ASGI server cho FastAPI |
+
+---
+
+## 5. Tạo PayOS Service
+
+Tạo file [payos_service.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/payos_service.py):
+
+```python
+import os
+import hmac
+import hashlib
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class PayOSService:
+    BASE_URL = "https://api-merchant.payos.vn"
+
+    def __init__(self):
+        self.client_id = os.getenv("PAYOS_CLIENT_ID")
+        self.api_key = os.getenv("PAYOS_API_KEY")
+        self.checksum_key = os.getenv("PAYOS_CHECKSUM_KEY")
+
+        if not self.client_id or not self.api_key or not self.checksum_key:
+            raise Exception(
+                "❌ Thiếu PAYOS_CLIENT_ID / PAYOS_API_KEY / PAYOS_CHECKSUM_KEY"
+            )
+
+    # =============================
+    # TẠO SIGNATURE (CHUẨN PAYOS)
+    # =============================
+    def _create_signature(self, data: dict) -> str:
+        """
+        signature = HMAC_SHA256(checksum_key, rawData)
+
+        rawData format (BẮT BUỘC ĐÚNG THỨ TỰ ALPHABET):
+        amount=xxx&cancelUrl=xxx&description=xxx&orderCode=xxx&returnUrl=xxx
+        """
+        raw_data = (
+            f"amount={data['amount']}"
+            f"&cancelUrl={data['cancelUrl']}"
+            f"&description={data['description']}"
+            f"&orderCode={data['orderCode']}"
+            f"&returnUrl={data['returnUrl']}"
+        )
+
+        return hmac.new(
+            self.checksum_key.encode(),
+            raw_data.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+    # =============================
+    # TẠO LINK THANH TOÁN PAYOS
+    # =============================
+    def create_payment_link(
+        self,
+        order_code: int,
+        amount: int,
+        description: str,
+        return_url: str = "https://t.me",
+        cancel_url: str = "https://t.me"
+    ):
+        """
+        Gọi PayOS API tạo payment link.
+        
+        Params:
+            order_code (int): Mã số đơn hàng (PHẢI là int, unique)
+            amount (int): Số tiền (VND, BẮT BUỘC int)
+            description (str): Mô tả đơn hàng (hiển thị trên QR)
+            return_url (str): URL redirect khi thanh toán thành công
+            cancel_url (str): URL redirect khi huỷ thanh toán
+        
+        Returns:
+            dict: Response từ PayOS chứa checkoutUrl, QR info, etc.
+        """
+        url = f"{self.BASE_URL}/v2/payment-requests"
+
+        payload = {
+            "orderCode": int(order_code),   # BẮT BUỘC int
+            "amount": int(amount),
+            "description": description,
+            "cancelUrl": cancel_url,
+            "returnUrl": return_url,
+            "items": [
+                {
+                    "name": "Tên sản phẩm",
+                    "quantity": 1,
+                    "price": int(amount)
+                }
+            ]
+        }
+
+        # 🔐 TÍNH SIGNATURE SAU KHI CÓ PAYLOAD
+        payload["signature"] = self._create_signature(payload)
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-client-id": self.client_id,
+            "x-api-key": self.api_key
+        }
+
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=15
+        )
+
+        try:
+            return response.json()
+        except Exception:
+            return {
+                "error": "INVALID_RESPONSE",
+                "status_code": response.status_code,
+                "raw": response.text
+            }
+
+    # =============================
+    # VERIFY WEBHOOK SIGNATURE
+    # =============================
+    def verify_webhook(self, data: dict, signature: str) -> bool:
+        """
+        Verify signature từ PayOS webhook.
+        
+        rawData format:
+        orderCode=xxx&amount=xxx&description=xxx
+        """
+        raw_data = (
+            f"orderCode={data['orderCode']}"
+            f"&amount={data['amount']}"
+            f"&description={data['description']}"
+        )
+
+        expected_signature = hmac.new(
+            self.checksum_key.encode(),
+            raw_data.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        return expected_signature == signature
+```
+
+### Giải thích Signature:
+
+> [!WARNING]
+> Signature là phần **quan trọng nhất** và cũng **dễ sai nhất**. Lưu ý:
+> 
+> - **Thứ tự các field phải đúng alphabet**: `amount` → `cancelUrl` → `description` → `orderCode` → `returnUrl`
+> - **Format**: `key1=value1&key2=value2&...` (không có space)
+> - **Dùng `hmac.new()` với SHA256**, key là `CHECKSUM_KEY`
+> - `orderCode` và `amount` **phải là int**, **KHÔNG phải string**
+
+---
+
+## 6. Tạo Payment Link & Hiển Thị QR Code
+
+### 6.1 Gọi PayOS tạo link
+
+```python
+from payos_service import PayOSService
+import time
+
+payos = PayOSService()
+
+# order_code phải unique (dùng timestamp)
+order_code = int(time.time())
+
+pay = payos.create_payment_link(
+    order_code=order_code,
+    amount=50000,                        # 50,000 VND
+    description=f"Thanh toan don {order_code}"  # Max 25 ký tự
+)
+```
+
+### 6.2 Response từ PayOS (cấu trúc)
+
+```json
+{
+  "code": "00",
+  "desc": "success",
+  "data": {
+    "bin": "970422",               // Mã ngân hàng
+    "accountNumber": "123456789",  // Số tài khoản
+    "accountName": "TEN CHU TK",
+    "amount": 50000,
+    "description": "Thanh toan don 1706700000",
+    "orderCode": 1706700000,
+    "currency": "VND",
+    "paymentLinkId": "xxx",
+    "status": "PENDING",
+    "checkoutUrl": "https://pay.payos.vn/web/xxx",  // Link thanh toán
+    "qrCode": "data:image/png;base64,..."            // QR base64
+  }
+}
+```
+
+### 6.3 Tạo QR Image URL (dùng VietQR)
+
+Thay vì dùng QR base64, bot dùng **VietQR API** để generate ảnh QR đẹp hơn:
+
+```python
+qr_url = (
+    f"https://img.vietqr.io/image/"
+    f"{pay['data']['bin']}-{pay['data']['accountNumber']}-compact.png"
+    f"?amount={amount}&addInfo={pay['data']['description']}"
+)
+```
+
+**Giải thích URL**:
+```
+https://img.vietqr.io/image/{mã_ngân_hàng}-{số_tài_khoản}-compact.png?amount={số_tiền}&addInfo={nội_dung_CK}
+```
+
+### 6.4 Gửi QR + Link trong Telegram Bot
+
+```python
+# Gửi ảnh QR kèm caption và nút bấm
+qr_msg = await query.message.reply_photo(
+    photo=qr_url,
+    caption=(
+        f"🧾 <b>ĐƠN HÀNG: {order_id}</b>\n"
+        f"💰 <b>{total:,}đ</b>\n\n"
+        f"⚠️ Đơn sẽ tự huỷ sau 2 phút nếu không thanh toán."
+    ),
+    parse_mode="HTML",
+    reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "🔗 Mở trang thanh toán",
+            url=pay["data"]["checkoutUrl"]   # Link checkout PayOS
+        )],
+        [InlineKeyboardButton(
+            "❌ Huỷ đơn",
+            callback_data=f"cancel_{order_id}"
+        )]
+    ])
+)
+```
+
+---
+
+## 7. Webhook Server - Nhận Thông Báo Thanh Toán
+
+Tạo file [webhook_server.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/webhook_server.py):
+
+```python
+from fastapi import FastAPI, Request, HTTPException
+from payos_service import PayOSService
+
+app = FastAPI()
+payos = PayOSService()
+
+
+@app.post("/payos/webhook")
+async def payos_webhook(request: Request):
+    payload = await request.json()
+
+    print("📩 WEBHOOK RECEIVED:")
+    print(payload)
+
+    # =========================
+    # 1️⃣ LẤY DATA + SIGNATURE
+    # =========================
+    data = payload.get("data") or payload
+    signature = payload.get("signature")
+
+    if not data or not signature:
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
+
+    # =========================
+    # 2️⃣ VERIFY SIGNATURE
+    # =========================
+    is_valid = payos.verify_webhook(data, signature)
+    if not is_valid:
+        print("❌ INVALID SIGNATURE")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    print("✅ WEBHOOK VERIFIED")
+
+    # =========================
+    # 3️⃣ KIỂM TRA TRẠNG THÁI
+    # =========================
+    code = payload.get("code", "00")
+    if code != "00":
+        print("⚠️ Payment not successful, ignore")
+        return {"status": "ignored"}
+
+    order_code = data.get("orderCode")
+    if not order_code:
+        raise HTTPException(status_code=400, detail="Missing orderCode")
+
+    # =========================
+    # 4️⃣ XỬ LÝ ĐƠN HÀNG
+    # =========================
+    # 👇 Tuỳ chỉnh logic xử lý đơn hàng ở đây
+    # Ví dụ: update database, gửi thông báo, giao hàng...
+    
+    order_id = f"ORD_BOT_{order_code}"
+    print(f"💰 PAID ORDER: {order_id}")
+
+    # TODO: Thêm logic xử lý đơn hàng của bạn ở đây
+
+    return {"status": "success"}
+```
+
+### Chạy Webhook Server
+
+```bash
+# Chạy local (port 8000)
+uvicorn webhook_server:app --host 0.0.0.0 --port 8000
+
+# Test local dùng ngrok (để PayOS gọi được)
+ngrok http 8000
+```
+
+### Webhook Payload từ PayOS (cấu trúc)
+
+```json
+{
+  "code": "00",
+  "desc": "success",
+  "data": {
+    "orderCode": 1706700000,
+    "amount": 50000,
+    "description": "Thanh toan don 1706700000",
+    "accountNumber": "123456789",
+    "reference": "FT24031xxxx",
+    "transactionDateTime": "2024-01-31 15:30:00",
+    "currency": "VND",
+    "paymentLinkId": "xxx",
+    "code": "00",
+    "desc": "success"
+  },
+  "signature": "abc123def456..."
+}
+```
+
+---
+
+## 8. Cấu Hình Webhook Trên PayOS Dashboard
+
+1. Truy cập [PayOS Dashboard](https://my.payos.vn)
+2. Vào **Channel** của bạn → **Cài đặt** → **Webhook**
+3. Nhập **Webhook URL**:
+   - **Local (dev)**: Dùng ngrok → `https://xxxx.ngrok.io/payos/webhook`
+   - **Production**: `https://your-domain.com/payos/webhook`
+4. Chọn events: **Payment success**
+5. Lưu lại
+
+> [!TIP]
+> - Nếu deploy trên **Render**, webhook URL sẽ là: `https://your-app-name.onrender.com/payos/webhook`
+> - PayOS sẽ gửi POST request đến URL này mỗi khi có thanh toán thành công
+
+---
+
+## 9. Flow Hoàn Chỉnh
+
+```
+1. User gõ /start trên Telegram
+       ↓
+2. Bot hiển thị sản phẩm + nút chọn số lượng
+       ↓
+3. User bấm chọn số lượng
+       ↓
+4. Bot gọi PayOS API → tạo payment link
+       ↓
+5. Bot gửi QR Code + nút "Mở trang thanh toán" cho user
+       ↓
+6. User quét QR / bấm link → chuyển khoản
+       ↓
+7. PayOS xác nhận thanh toán → POST webhook
+       ↓
+8. Webhook server verify signature
+       ↓
+9. Xử lý đơn hàng (update DB, gửi hàng, thông báo...)
+```
+
+### Auto Cancel (Tuỳ chọn):
+Bot có thể tự huỷ đơn nếu user không thanh toán trong thời gian quy định:
+
+```python
+AUTO_CANCEL_MINUTES = 2  # Huỳ sau 2 phút
+
+async def auto_cancel_order(context, chat_id, order_id):
+    await asyncio.sleep(AUTO_CANCEL_MINUTES * 60)
+    
+    # Rollback stock, cancel order
+    rollback_stock(order_id)
+    cancel_order_sheet(order_id)
+    
+    # Xoá QR message
+    qr_message_id = context.user_data.get("qr_message_id")
+    if qr_message_id:
+        try:
+            await context.bot.delete_message(chat_id, qr_message_id)
+        except Exception:
+            pass
+    
+    context.user_data.clear()
+    await context.bot.send_message(
+        chat_id,
+        "⏰ Đơn hàng đã bị huỷ do quá thời gian thanh toán.\nGõ /start để mua lại."
+    )
+```
+
+---
+
+## 10. Checklist Triển Khai
+
+### ✅ Bước 1: Chuẩn bị
+- [ ] Đăng ký tài khoản PayOS tại [payos.vn](https://payos.vn)
+- [ ] Tạo Channel mới trên PayOS Dashboard
+- [ ] Lấy 3 key: `CLIENT_ID`, `API_KEY`, `CHECKSUM_KEY`
+
+### ✅ Bước 2: Code
+- [ ] Cài dependencies: `pip install requests python-dotenv fastapi uvicorn`
+- [ ] Thêm 3 biến PayOS vào [.env](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/.env)
+- [ ] Tạo file [payos_service.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/payos_service.py) (copy code ở Bước 5)
+- [ ] Tạo file [webhook_server.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/webhook_server.py) (copy code ở Bước 7)
+- [ ] Tích hợp vào bot: gọi [create_payment_link()](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/payos_service.py#51-100) khi user mua hàng
+
+### ✅ Bước 3: Webhook
+- [ ] Deploy webhook server (Render / VPS / ngrok cho dev)
+- [ ] Vào PayOS Dashboard → cấu hình Webhook URL
+- [ ] Test: tạo đơn → thanh toán → check log webhook
+
+### ✅ Bước 4: Production
+- [ ] Đảm bảo webhook server luôn online
+- [ ] Thêm error handling đầy đủ
+- [ ] Log tất cả webhook nhận được để debug
+- [ ] Xử lý trường hợp webhook trùng (idempotency)
+
+---
+
+## ⚠️ Lưu Ý Quan Trọng
+
+> [!CAUTION]
+> **Những lỗi thường gặp:**
+> 
+> 1. **Signature sai** → Kiểm tra lại thứ tự alphabet của fields trong rawData
+> 2. **orderCode trùng** → Mỗi đơn PHẢI có orderCode unique (dùng timestamp)
+> 3. **amount phải là int** → `50000` chứ KHÔNG phải `"50000"` hay `50000.0`
+> 4. **description tối đa 25 ký tự** → Dài hơn sẽ bị cắt / lỗi
+> 5. **Webhook URL phải HTTPS** → Không dùng HTTP (trừ localhost qua ngrok)
+> 6. **Webhook phải trả 200** → Nếu trả lỗi, PayOS sẽ retry nhiều lần
+
+---
+
+> **Bài viết này được tạo từ codebase [Telegram_Sepay_Bot](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot).**
+> Khi áp dụng sang bot khác, chỉ cần copy [payos_service.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/payos_service.py) và điều chỉnh [webhook_server.py](file:///Users/daoluutrongluan/Coding/Bot_Python/Telegram_Sepay_Bot/webhook_server.py) theo logic riêng của bot đó.
