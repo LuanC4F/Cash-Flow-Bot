@@ -856,6 +856,11 @@ async def cancel_debt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def debt_conv_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Catch-all: tự động kết thúc conversation cũ khi user bấm nút khác"""
+    return ConversationHandler.END
+
+
 # ==================== ĐÒI NỢ ====================
 
 SET_TID = 20  # State cho conversation set Telegram ID

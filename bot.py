@@ -67,7 +67,7 @@ from handlers.debt import (
     cust_pay, cust_check, cust_cancel,
     trano_start, trano_confirm, trano_all,
     xoano_start, xoano_confirm,
-    cancel_debt,
+    cancel_debt, debt_conv_fallback,
     NO_CUSTOMER, NO_AMOUNT, NO_NOTE, NO_TELEGRAM_ID, TRANO_SELECT, XOANO_SELECT, SET_TID
 )
 
@@ -356,6 +356,7 @@ def main():
         fallbacks=[
             CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
             CommandHandler("cancel", cancel_debt),
+            CallbackQueryHandler(debt_conv_fallback),  # Catch-all: end stale conversation
         ],
         per_message=False,
     )
@@ -369,6 +370,7 @@ def main():
         fallbacks=[
             CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
             CommandHandler("cancel", cancel_debt),
+            CallbackQueryHandler(debt_conv_fallback),  # Catch-all
         ],
         per_message=False,
     )
@@ -382,6 +384,7 @@ def main():
         fallbacks=[
             CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
             CommandHandler("cancel", cancel_debt),
+            CallbackQueryHandler(debt_conv_fallback),  # Catch-all
         ],
         per_message=False,
     )
@@ -414,7 +417,7 @@ def main():
         ],
         per_message=False,
     )
-    application.add_handler(set_tid_conv)
+    application.add_handler(set_tid_conv, group=1)  # Group 1: tránh bị block bởi ConversationHandler group 0
     
     # Basic commands
     application.add_handler(CommandHandler("start", start_command))
