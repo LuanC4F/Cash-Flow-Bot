@@ -589,12 +589,13 @@ def delete_expense(row_num: int) -> bool:
 
 # ==================== DEBT MANAGEMENT ====================
 
-def add_debt(customer: str, amount: float, note: str = "") -> Dict:
+def add_debt(customer: str, amount: float, note: str = "", telegram_id: str = "") -> Dict:
     """Add new debt record"""
     sheet = get_client().worksheet(config.SHEET_DEBTS)
     date = get_local_date()
     
-    row = [date, customer, amount, note, "pending", ""]
+    # Columns: Date | Customer | Amount | Note | Status | PaidDate | TelegramID
+    row = [date, customer, amount, note, "pending", "", telegram_id]
     sheet.append_row(row, value_input_option='USER_ENTERED')
     
     return {
@@ -602,7 +603,8 @@ def add_debt(customer: str, amount: float, note: str = "") -> Dict:
         'customer': customer,
         'amount': amount,
         'note': note,
-        'status': 'pending'
+        'status': 'pending',
+        'telegram_id': telegram_id
     }
 
 
@@ -622,7 +624,8 @@ def get_all_debts(status: str = None) -> List[Dict]:
                 'amount': float(row.get('Amount', 0) or 0),
                 'note': row.get('Note', ''),
                 'status': debt_status,
-                'paid_date': row.get('PaidDate', '')
+                'paid_date': row.get('PaidDate', ''),
+                'telegram_id': str(row.get('TelegramID', '')).strip()
             })
     
     return debts
@@ -649,9 +652,12 @@ def get_all_customers_with_debt() -> List[Dict]:
     for d in debts:
         name = d['customer']
         if name not in customers:
-            customers[name] = {'customer': name, 'total': 0, 'count': 0}
+            customers[name] = {'customer': name, 'total': 0, 'count': 0, 'telegram_id': ''}
         customers[name]['total'] += d['amount']
         customers[name]['count'] += 1
+        # Lấy telegram_id từ bất kỳ khoản nợ nào có
+        if d.get('telegram_id') and not customers[name]['telegram_id']:
+            customers[name]['telegram_id'] = d['telegram_id']
     
     return list(customers.values())
 
@@ -701,3 +707,28 @@ def delete_debt(row_num: int) -> bool:
         return True
     except Exception:
         return False
+
+
+def get_customer_telegram_id(customer: str) -> str:
+    """Get Telegram ID for a customer from their debt records"""
+    debts = get_all_debts(status='pending')
+    for d in debts:
+        if d['customer'].lower() == customer.lower() and d.get('telegram_id'):
+            return d['telegram_id']
+    return ''
+
+
+def set_customer_telegram_id(customer: str, telegram_id: str) -> int:
+    """
+    Set Telegram ID for all debt records of a customer.
+    Returns number of rows updated.
+    """
+    sheet = get_client().worksheet(config.SHEET_DEBTS)
+    debts = get_all_debts(status='pending')
+    count = 0
+    for d in debts:
+        if d['customer'].lower() == customer.lower():
+            # Column G (7) = TelegramID
+            sheet.update_cell(d['row'], 7, telegram_id)
+            count += 1
+    return count

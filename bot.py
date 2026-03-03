@@ -60,13 +60,15 @@ from handlers.expense import (
 from handlers.debt import (
     no_command, 
     ghino_start, ghino_customer, ghino_amount, ghino_note, ghino_skip_note,
-    ghino_select_customer,
+    ghino_select_customer, ghino_telegram_id, ghino_skip_tid,
     debt_list, debt_by_customer, debt_customer_detail, debt_summary,
     debt_create_paylink, debt_check_payment, debt_cancel_qr,
+    debt_doino, debt_set_tid_start, debt_set_tid_confirm,
+    cust_pay, cust_check, cust_cancel,
     trano_start, trano_confirm, trano_all,
     xoano_start, xoano_confirm,
     cancel_debt,
-    NO_CUSTOMER, NO_AMOUNT, NO_NOTE, TRANO_SELECT, XOANO_SELECT
+    NO_CUSTOMER, NO_AMOUNT, NO_NOTE, NO_TELEGRAM_ID, TRANO_SELECT, XOANO_SELECT, SET_TID
 )
 
 # Cấu hình logging - Chỉ hiển thị log quan trọng
@@ -346,6 +348,10 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_note),
                 CallbackQueryHandler(ghino_skip_note, pattern="^debt_skip_note$"),
             ],
+            NO_TELEGRAM_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_telegram_id),
+                CallbackQueryHandler(ghino_skip_tid, pattern="^debt_skip_tid$"),
+            ],
         },
         fallbacks=[
             CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
@@ -396,6 +402,20 @@ def main():
     application.add_handler(trano_conv)
     application.add_handler(xoano_conv)
     
+    # Set Telegram ID conversation
+    set_tid_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(debt_set_tid_start, pattern="^debt_settid_")],
+        states={
+            SET_TID: [MessageHandler(filters.TEXT & ~filters.COMMAND, debt_set_tid_confirm)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_debt, pattern="^cancel_debt$"),
+            CommandHandler("cancel", cancel_debt),
+        ],
+        per_message=False,
+    )
+    application.add_handler(set_tid_conv)
+    
     # Basic commands
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
@@ -408,8 +428,14 @@ def main():
     application.add_handler(CallbackQueryHandler(debt_create_paylink, pattern="^debt_paylink_"))
     application.add_handler(CallbackQueryHandler(debt_check_payment, pattern="^debt_checkpay_"))
     application.add_handler(CallbackQueryHandler(debt_cancel_qr, pattern="^debt_cancelqr_"))
+    application.add_handler(CallbackQueryHandler(debt_doino, pattern="^debt_doino_"))
     application.add_handler(CallbackQueryHandler(trano_all, pattern="^debt_payall_"))
     application.add_handler(CallbackQueryHandler(debt_summary, pattern="^debt_summary$"))
+    
+    # Customer self-payment handlers (KHÔNG check permission - để khách nợ tự thanh toán)
+    application.add_handler(CallbackQueryHandler(cust_pay, pattern="^custpay_"))
+    application.add_handler(CallbackQueryHandler(cust_check, pattern="^custcheck_"))
+    application.add_handler(CallbackQueryHandler(cust_cancel, pattern="^custcancel_"))
     
     # Callback handler cho inline buttons (menu navigation) - Phải ở cuối vì không có pattern
     application.add_handler(CallbackQueryHandler(button_callback))
