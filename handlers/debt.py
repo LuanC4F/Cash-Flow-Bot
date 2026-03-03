@@ -412,7 +412,7 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard = [
             [InlineKeyboardButton("🏦 APP NGÂN HÀNG", url=result['checkout_url'])],
             [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"debt_checkpay_{result['order_code']}")],
-            [InlineKeyboardButton("❌ Hủy đơn", callback_data=f"debt_customer_{customer[:15]}")],
+            [InlineKeyboardButton("❌ Hủy đơn", callback_data=f"debt_cancelqr_{customer[:15]}")],
         ]
         
         # Gửi ảnh QR code
@@ -420,12 +420,13 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
         checkout_url = result.get('checkout_url', '')
         chat_id = query.message.chat_id
         
+        qr_msg = None
         sent = False
         
         if qr_url:
             # Cách 1: Gửi URL trực tiếp cho Telegram tải
             try:
-                await context.bot.send_photo(
+                qr_msg = await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=qr_url,
                     caption=caption,
@@ -446,7 +447,7 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
                         qr_bytes = io.BytesIO(resp.read())
                         qr_bytes.name = 'qr_payment.png'
                     
-                    await context.bot.send_photo(
+                    qr_msg = await context.bot.send_photo(
                         chat_id=chat_id,
                         photo=qr_bytes,
                         caption=caption,
@@ -459,11 +460,23 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not sent:
             # Cách 3: Gửi link text
             caption += f"\n\n🔗 Link: {checkout_url}"
-            await context.bot.send_message(
+            qr_msg = await context.bot.send_message(
                 chat_id=chat_id,
                 text=caption,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+        
+        # Lưu QR message ID để xóa sau khi thanh toán/hủy
+        if qr_msg:
+            context.user_data['qr_message_id'] = qr_msg.message_id
+            context.user_data['qr_chat_id'] = chat_id
+        
+        # Xóa message "⏳ Đang tạo QR..." cho gọn
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+    
     except Exception as e:
         await query.edit_message_text(f"❌ Lỗi tạo QR: {str(e)}", reply_markup=get_back_keyboard())
 
@@ -471,7 +484,6 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kiểm tra trạng thái thanh toán PayOS"""
     query = update.callback_query
-    await query.answer()
     
     order_code_str = query.data.replace("debt_checkpay_", "")
     
@@ -482,9 +494,16 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         result = check_payment_status(order_code)
         
         customer = context.user_data.get('payos_customer', '')
+        chat_id = query.message.chat_id
         
         if result['status'] == 'PAID':
-            # Tự động đánh dấu tất cả nợ đã trả
+            # ✅ Thanh toán thành công → xóa QR + cập nhật sheet
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            
+            # Tự động đánh dấu tất cả nợ đã trả trong sheet
             count = sheets.mark_customer_debts_paid(customer)
             
             text = f"""✅ ĐÃ THANH TOÁN THÀNH CÔNG!
@@ -495,39 +514,80 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 🎉 Đã tự động đánh dấu {count} khoản nợ đã trả!"""
             
+            # Dọn dẹp user_data
             context.user_data.pop('payos_order', None)
             context.user_data.pop('payos_customer', None)
+            context.user_data.pop('qr_message_id', None)
+            context.user_data.pop('qr_chat_id', None)
             
-            await query.edit_message_text(text, reply_markup=get_debt_keyboard())
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=get_debt_keyboard()
+            )
         
         elif result['status'] == 'CANCELLED':
+            # ❌ Đã hủy → xóa QR
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            
             text = f"❌ Thanh toán đã bị HỦY!\n\nMã đơn: {order_code}"
             
             keyboard = [
-                [InlineKeyboardButton(f"💳 Tạo Link Mới", callback_data=f"debt_paylink_{customer[:15]}")],
+                [InlineKeyboardButton("💳 Tạo Link Mới", callback_data=f"debt_paylink_{customer[:15]}")],
                 [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
             ]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            
+            # Dọn dẹp user_data
+            context.user_data.pop('payos_order', None)
+            context.user_data.pop('payos_customer', None)
+            context.user_data.pop('qr_message_id', None)
+            context.user_data.pop('qr_chat_id', None)
+            
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         
         else:
-            # PENDING
-            text = f"""⏳ CHƯA THANH TOÁN
-
-👤 Khách: {customer}
-📋 Mã đơn: {order_code}
-📊 Trạng thái: Đang chờ thanh toán
-
-💡 Gửi link cho khách và bấm Kiểm Tra lại sau."""
-            
-            keyboard = [
-                [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data=f"debt_checkpay_{order_code}")],
-                [InlineKeyboardButton(f"👤 Quay lại {customer}", callback_data=f"debt_customer_{customer[:15]}")],
-                [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
-            ]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            # ⏳ PENDING → hiện popup, giữ QR để khách quét
+            await query.answer(
+                "⏳ Chưa thanh toán.\nGửi link cho khách và bấm Kiểm Tra lại sau.",
+                show_alert=True
+            )
     
     except Exception as e:
-        await query.edit_message_text(f"❌ Lỗi kiểm tra: {str(e)}", reply_markup=get_back_keyboard())
+        await query.answer(f"❌ Lỗi: {str(e)}", show_alert=True)
+
+
+async def debt_cancel_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hủy đơn QR thanh toán - xóa message QR"""
+    query = update.callback_query
+    await query.answer()
+    
+    customer = query.data.replace("debt_cancelqr_", "")
+    chat_id = query.message.chat_id
+    
+    # Xóa message QR
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    
+    # Dọn dẹp user_data
+    context.user_data.pop('payos_order', None)
+    context.user_data.pop('payos_customer', None)
+    context.user_data.pop('qr_message_id', None)
+    context.user_data.pop('qr_chat_id', None)
+    
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"❌ Đã hủy đơn thanh toán của {customer}.",
+        reply_markup=get_debt_keyboard()
+    )
 
 
 # ==================== TRẢ NỢ ====================
