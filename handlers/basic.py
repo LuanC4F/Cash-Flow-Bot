@@ -127,11 +127,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý lệnh /start"""
     user = update.effective_user
     
-    # Kiểm tra quyền
+    # Non-admin: chào hỏi nhẹ, ghi nhận để gửi đòi nợ sau
     if not check_permission(user.id):
-        await update.message.reply_text(UNAUTHORIZED_MESSAGE)
+        await update.message.reply_text(
+            f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
+            f"Bot này được sử dụng để quản lý thanh toán.\n"
+            f"Nếu bạn nhận được thông báo công nợ, "
+            f"vui lòng bấm nút thanh toán trong tin nhắn đó.\n\n"
+            f"📱 ID của bạn: `{user.id}`",
+            parse_mode='Markdown'
+        )
         return
     
+    # Admin: hiện menu đầy đủ
     welcome_message = f"""
 🎉 *Chào mừng {user.first_name or 'bạn'}!*
 
