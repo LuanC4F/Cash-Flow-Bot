@@ -15,6 +15,7 @@ from telegram.ext import (
     ConversationHandler,
     filters
 )
+from telegram.ext._application import ApplicationHandlerStop
 
 import config
 
@@ -109,9 +110,43 @@ def self_ping():
         time.sleep(300)  # 5 phút
 
 
-# ==================== BẢO MẬT ====================
-# Thông báo khi không có quyền - Tùy chỉnh tại đây (dòng 79)
-UNAUTHORIZED_MESSAGE = "🚫 Bạn không có quyền sử dụng bot này."
+# ==================== BẢO MẬT TOÀN CỤC ====================
+from utils.security import check_permission, UNAUTHORIZED_MESSAGE as SEC_UNAUTHORIZED
+
+
+async def global_permission_check(update: Update, context):
+    """
+    Chặn TẤT CẢ user không phải admin.
+    Chỉ cho phép:
+    - /start (để bot ghi nhận user, gửi đòi nợ sau)
+    - custpay_, custcheck_, custcancel_ (khách tự thanh toán)
+    """
+    user = update.effective_user
+    if not user:
+        return
+    
+    # Admin → cho phép mọi thứ
+    if check_permission(user.id):
+        return
+    
+    # /start → cho phép (ghi nhận user)
+    if update.message and update.message.text:
+        if update.message.text.startswith('/start'):
+            return
+    
+    # Nút thanh toán khách → cho phép
+    if update.callback_query:
+        data = update.callback_query.data or ''
+        if data.startswith(('custpay_', 'custcheck_', 'custcancel_')):
+            return
+    
+    # Chặn tất cả còn lại
+    if update.callback_query:
+        await update.callback_query.answer(SEC_UNAUTHORIZED, show_alert=True)
+    elif update.message:
+        await update.message.reply_text(SEC_UNAUTHORIZED)
+    
+    raise ApplicationHandlerStop()
 
 
 async def check_user_permission(update: Update, context) -> bool:
@@ -390,6 +425,14 @@ def main():
     )
     
     # ==================== ĐĂNG KÝ HANDLERS ====================
+    
+    # 🔒 GLOBAL PERMISSION CHECK (group -1: chạy TRƯỚC tất cả)
+    application.add_handler(
+        MessageHandler(filters.ALL, global_permission_check), group=-1
+    )
+    application.add_handler(
+        CallbackQueryHandler(global_permission_check), group=-1
+    )
     
     # Conversation handlers (phải đăng ký trước)
     application.add_handler(themsp_conv)
