@@ -23,16 +23,20 @@ SHEET_DEBTS = os.getenv("SHEET_DEBTS", "Debts")
 
 # Bảo mật: Chỉ cho phép user ID này sử dụng bot
 # Để lấy ID: chat với @userinfobot trên Telegram
+import sys
 _raw_uid = os.getenv("ALLOWED_USER_ID", "").strip().strip('"').strip("'")
 ALLOWED_USER_ID = None
 if _raw_uid:
     try:
         ALLOWED_USER_ID = int(_raw_uid)
-        print(f"✅ ALLOWED_USER_ID loaded: {ALLOWED_USER_ID}")
+        sys.stderr.write(f"✅ ALLOWED_USER_ID = {ALLOWED_USER_ID}\n")
+        sys.stderr.flush()
     except ValueError:
-        print(f"❌ ALLOWED_USER_ID invalid: '{_raw_uid}'")
+        sys.stderr.write(f"❌ ALLOWED_USER_ID invalid: '{_raw_uid}'\n")
+        sys.stderr.flush()
 else:
-    print("⚠️ ALLOWED_USER_ID not set - NO ONE can use bot!")
+    sys.stderr.write(f"⚠️ ALLOWED_USER_ID not set! Raw env = '{os.getenv('ALLOWED_USER_ID', 'MISSING')}'\n")
+    sys.stderr.flush()
 
 # Timezone Vietnam (UTC+7)
 from datetime import timezone, timedelta
