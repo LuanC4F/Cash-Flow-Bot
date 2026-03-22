@@ -5,7 +5,6 @@ Main entry point
 
 import os
 import logging
-import threading
 from telegram import Update
 from telegram.ext import (
     Application, 
@@ -84,30 +83,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
-
-
-def self_ping():
-    """Tự ping chính mình mỗi 5 phút để giữ Render không spin down"""
-    import time
-    import urllib.request
-    
-    time.sleep(30)  # Đợi server khởi động
-    render_url = os.getenv('RENDER_EXTERNAL_URL', '')
-    
-    if not render_url:
-        return
-    
-    ping_url = f"{render_url}/{config.BOT_TOKEN}"
-    
-    while True:
-        try:
-            req = urllib.request.Request(ping_url, method='HEAD')
-            urllib.request.urlopen(req, timeout=30)
-            logger.info("✅ Self-ping OK")
-        except Exception:
-            pass  # Bỏ qua lỗi, chỉ cần request đến Render
-        
-        time.sleep(300)  # 5 phút
 
 
 # ==================== BẢO MẬT TOÀN CỤC ====================
@@ -523,11 +498,6 @@ def main():
     if webhook_url:
         # ===== PRODUCTION: Webhook mode =====
         logger.info(f"🌐 Webhook mode: {webhook_url}")
-        
-        # Self-ping giữ Render không sleep (chỉ 144 requests/ngày vs polling 30,000+)
-        ping_thread = threading.Thread(target=self_ping, daemon=True)
-        ping_thread.start()
-        logger.info("🔄 Self-ping started (every 5 min)")
         
         application.run_webhook(
             listen='0.0.0.0',
