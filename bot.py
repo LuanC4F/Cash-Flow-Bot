@@ -64,7 +64,7 @@ from handlers.debt import (
     debt_list, debt_by_customer, debt_customer_detail, debt_summary,
     debt_create_paylink, debt_check_payment, debt_cancel_qr,
     debt_doino, debt_set_tid_start, debt_set_tid_confirm,
-    cust_pay, cust_check, cust_cancel,
+    cust_pay, cust_check, cust_cancel, cust_refresh,
     trano_start, trano_confirm, trano_all,
     xoano_start, xoano_confirm,
     cancel_debt, debt_conv_fallback,
@@ -112,7 +112,7 @@ async def global_permission_check(update: Update, context):
     # Nút thanh toán khách → cho phép
     if update.callback_query:
         data = update.callback_query.data or ''
-        if data.startswith(('custpay_', 'custcheck_', 'custcancel_')):
+        if data.startswith(('custpay_', 'custcheck_', 'custcancel_', 'cust_refresh')):
             return
     
     # Chặn tất cả còn lại
@@ -457,6 +457,7 @@ def main():
     application.add_handler(CallbackQueryHandler(cust_pay, pattern="^custpay_"))
     application.add_handler(CallbackQueryHandler(cust_check, pattern="^custcheck_"))
     application.add_handler(CallbackQueryHandler(cust_cancel, pattern="^custcancel_"))
+    application.add_handler(CallbackQueryHandler(cust_refresh, pattern="^cust_refresh$"))
     
     # Callback handler cho inline buttons (menu navigation) - Phải ở cuối vì không có pattern
     application.add_handler(CallbackQueryHandler(button_callback))

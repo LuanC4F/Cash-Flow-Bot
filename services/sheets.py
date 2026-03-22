@@ -637,6 +637,36 @@ def get_debts_by_customer(customer: str) -> List[Dict]:
     return [d for d in all_debts if d['customer'].lower() == customer.lower()]
 
 
+def get_debts_by_telegram_id(telegram_id: str) -> List[Dict]:
+    """Get all pending debts linked to a Telegram ID"""
+    tid = str(telegram_id).strip()
+    all_debts = get_all_debts(status='pending')
+    return [d for d in all_debts if d.get('telegram_id') == tid]
+
+
+def get_customer_name_by_telegram_id(telegram_id: str) -> str:
+    """Get customer name from their Telegram ID"""
+    debts = get_debts_by_telegram_id(telegram_id)
+    if debts:
+        return debts[0]['customer']
+    return ''
+
+
+def auto_link_telegram_id(customer: str, telegram_id: str) -> int:
+    """
+    Auto-link Telegram ID to all pending debt records of a customer
+    that don't have a TelegramID yet. Returns count of updated rows.
+    """
+    sheet = get_client().worksheet(config.SHEET_DEBTS)
+    debts = get_all_debts(status='pending')
+    count = 0
+    for d in debts:
+        if d['customer'].lower() == customer.lower() and not d.get('telegram_id'):
+            sheet.update_cell(d['row'], 7, telegram_id)
+            count += 1
+    return count
+
+
 def get_customer_total_debt(customer: str) -> float:
     """Get total pending debt for a customer"""
     debts = get_debts_by_customer(customer)

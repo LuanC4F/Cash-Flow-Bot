@@ -127,16 +127,43 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý lệnh /start"""
     user = update.effective_user
     
-    # Non-admin: chào hỏi nhẹ, ghi nhận để gửi đòi nợ sau
+    # Non-admin: check nợ + cho phép thanh toán
     if not check_permission(user.id):
-        await update.message.reply_text(
-            f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
-            f"Bot này được sử dụng để quản lý thanh toán.\n"
-            f"Nếu bạn nhận được thông báo công nợ, "
-            f"vui lòng bấm nút thanh toán trong tin nhắn đó.\n\n"
-            f"📱 ID của bạn: `{user.id}`",
-            parse_mode='Markdown'
-        )
+        from services import sheets
+        from utils.formatting import format_currency
+        
+        tid = str(user.id)
+        debts = sheets.get_debts_by_telegram_id(tid)
+        
+        if debts:
+            customer = debts[0]['customer']
+            total = sum(d['amount'] for d in debts)
+            
+            text = f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
+            text += f"📋 *CÔNG NỢ HIỆN TẠI*\n"
+            text += f"👤 {customer}\n\n"
+            
+            for d in debts:
+                note_text = f" - {d['note']}" if d['note'] else ""
+                text += f"• {d['date']}: {format_currency(d['amount'])}{note_text}\n"
+            
+            text += f"\n━━━━━━━━━━━━━━━━━\n"
+            text += f"💰 *Tổng nợ: {format_currency(total)}*"
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"💳 Thanh Toán {format_currency(total)}", callback_data=f"custpay_{customer[:15]}")],
+                [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data="cust_refresh")],
+            ])
+            
+            await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
+        else:
+            await update.message.reply_text(
+                f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
+                f"Bot này được sử dụng để quản lý thanh toán.\n"
+                f"Hiện bạn không có khoản nợ nào.\n\n"
+                f"📱 ID của bạn: `{user.id}`",
+                parse_mode='Markdown'
+            )
         return
     
     # Admin: hiện menu đầy đủ

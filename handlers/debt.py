@@ -1193,3 +1193,42 @@ async def cust_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('cust_order', None)
     context.user_data.pop('cust_customer', None)
 
+
+async def cust_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Khách bấm Kiểm Tra Lại → xem lại nợ hiện tại"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = query.from_user
+    tid = str(user.id)
+    
+    try:
+        debts = sheets.get_debts_by_telegram_id(tid)
+        
+        if debts:
+            customer = debts[0]['customer']
+            total = sum(d['amount'] for d in debts)
+            
+            text = f"📋 *CÔNG NỢ HIỆN TẠI*\n"
+            text += f"👤 {customer}\n\n"
+            
+            for d in debts:
+                note_text = f" - {d['note']}" if d['note'] else ""
+                text += f"• {d['date']}: {format_currency(d['amount'])}{note_text}\n"
+            
+            text += f"\n━━━━━━━━━━━━━━━━━\n"
+            text += f"💰 *Tổng nợ: {format_currency(total)}*"
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"💳 Thanh Toán {format_currency(total)}", callback_data=f"custpay_{customer[:15]}")],
+                [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data="cust_refresh")],
+            ])
+            
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=keyboard)
+        else:
+            await query.edit_message_text(
+                "🎉 Bạn không còn khoản nợ nào!\n\nCảm ơn bạn đã thanh toán. 🙏"
+            )
+    except Exception as e:
+        await query.answer(f"❌ Lỗi: {str(e)}", show_alert=True)
+
