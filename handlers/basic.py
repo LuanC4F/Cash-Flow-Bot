@@ -2,9 +2,14 @@
 Basic handlers - /start, /help, /menu với Inline Buttons
 """
 
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.error import BadRequest
+
+import config
+
+logger = logging.getLogger(__name__)
 
 
 def get_main_menu_keyboard():
@@ -164,6 +169,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📱 ID của bạn: `{user.id}`",
                 parse_mode='Markdown'
             )
+        
+        # 🔔 Thông báo admin khi khách /start bot
+        await _notify_admin_customer_start(context, user, debts)
         return
     
     # Admin: hiện menu đầy đủ
@@ -181,6 +189,45 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown',
         reply_markup=get_main_menu_keyboard()
     )
+
+
+async def _notify_admin_customer_start(context, user, debts):
+    """Gửi thông báo cho admin khi khách /start bot"""
+    if not config.ALLOWED_USER_ID:
+        return
+    
+    try:
+        from utils.formatting import format_currency
+        
+        name = user.full_name or user.first_name or 'N/A'
+        username = f"@{user.username}" if user.username else 'Không có'
+        
+        text = f"🔔 *KHÁCH VỪA START BOT*\n\n"
+        text += f"👤 Tên: {name}\n"
+        text += f"📱 ID: `{user.id}`\n"
+        text += f"🏷 Username: {username}\n"
+        
+        if debts:
+            customer = debts[0]['customer']
+            total = sum(d['amount'] for d in debts)
+            text += f"\n━━━ 💳 Công Nợ ━━━\n"
+            text += f"👤 Khách: {customer}\n"
+            text += f"📋 Số khoản nợ: {len(debts)}\n"
+            text += f"💰 Tổng nợ: {format_currency(total)}\n"
+            
+            for d in debts:
+                note_text = f" - {d['note']}" if d['note'] else ''
+                text += f"  • {d['date']}: {format_currency(d['amount'])}{note_text}\n"
+        else:
+            text += f"\n✅ Không có khoản nợ nào."
+        
+        await context.bot.send_message(
+            chat_id=config.ALLOWED_USER_ID,
+            text=text,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Lỗi gửi thông báo admin (customer start): {e}")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

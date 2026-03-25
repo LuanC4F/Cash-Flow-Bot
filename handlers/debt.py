@@ -2,12 +2,16 @@
 Debt Management Handlers - Quản lý nợ khách hàng
 """
 
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, CallbackQueryHandler, filters
 
+import config
 from services import sheets
 from utils.formatting import format_currency, parse_amount
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
+
+logger = logging.getLogger(__name__)
 
 
 # Conversation states
@@ -607,6 +611,12 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 text=text,
                 reply_markup=get_debt_keyboard()
             )
+            
+            # 🔔 Thông báo admin: khách đã thanh toán (qua admin check)
+            await _notify_admin_debt_paid(
+                context, customer, result['amount'], order_code, count,
+                source='admin_check'
+            )
         
         elif result['status'] == 'CANCELLED':
             # ❌ Đã hủy → xóa QR
@@ -1138,6 +1148,12 @@ async def cust_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await context.bot.send_message(chat_id=chat_id, text=text)
             
+            # 🔔 Thông báo admin: khách tự thanh toán thành công
+            await _notify_admin_debt_paid(
+                context, customer, result['amount'], order_code, count,
+                source='customer_self_pay'
+            )
+            
             # Dọn dẹp
             context.user_data.pop('cust_order', None)
             context.user_data.pop('cust_customer', None)
@@ -1231,4 +1247,55 @@ async def cust_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     except Exception as e:
         await query.answer(f"❌ Lỗi: {str(e)}", show_alert=True)
+
+
+# ==================== THÔNG BÁO ADMIN ====================
+
+async def _notify_admin_debt_paid(context, customer: str, amount: float, 
+                                   order_code: int, debt_count: int,
+                                   source: str = 'unknown'):
+    """Gửi thông báo cho admin khi khách thanh toán nợ thành công"""
+    if not config.ALLOWED_USER_ID:
+        return
+    
+    try:
+        source_label = {
+            'admin_check': '🔄 Admin kiểm tra',
+            'customer_self_pay': '💳 Khách tự thanh toán',
+        }.get(source, '❓ Không rõ')
+        
+        # Lấy chi tiết nợ đã trả (đã được mark paid)
+        all_debts = sheets.get_all_debts(status='paid')
+        paid_debts = [d for d in all_debts if d['customer'].lower() == customer.lower()]
+        # Lấy các khoản paid gần nhất (theo paid_date = hôm nay)
+        today = sheets.get_local_date()
+        today_paid = [d for d in paid_debts if d.get('paid_date') == today]
+        
+        text = f"💰 *KHÁCH ĐÃ THANH TOÁN NỢ!*\n\n"
+        text += f"👤 Khách: {customer}\n"
+        text += f"💵 Số tiền: {format_currency(amount)}\n"
+        text += f"📋 Mã đơn: `{order_code}`\n"
+        text += f"✅ Số khoản nợ đã xóa: {debt_count}\n"
+        text += f"📡 Nguồn: {source_label}\n"
+        
+        if today_paid:
+            text += f"\n━━━ 📝 Chi Tiết Nợ Đã Trả ━━━\n"
+            for d in today_paid:
+                note_text = f" - {d['note']}" if d['note'] else ''
+                text += f"  • {d['date']}: {format_currency(d['amount'])}{note_text}\n"
+        
+        # Kiểm tra còn nợ không
+        remaining = sheets.get_customer_total_debt(customer)
+        if remaining > 0:
+            text += f"\n⚠️ Còn nợ: {format_currency(remaining)}"
+        else:
+            text += f"\n🎉 Đã trả HẾT nợ!"
+        
+        await context.bot.send_message(
+            chat_id=config.ALLOWED_USER_ID,
+            text=text,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Lỗi gửi thông báo admin (debt paid): {e}")
 
