@@ -590,9 +590,13 @@ def delete_expense(row_num: int) -> bool:
 # ==================== DEBT MANAGEMENT ====================
 
 def add_debt(customer: str, amount: float, note: str = "", telegram_id: str = "") -> Dict:
-    """Add new debt record"""
+    """Add new debt record. Auto-populates Telegram ID from history if not provided."""
     sheet = get_client().worksheet(config.SHEET_DEBTS)
     date = get_local_date()
+    
+    # Auto-populate Telegram ID from past records if not provided
+    if not telegram_id:
+        telegram_id = get_customer_telegram_id(customer)
     
     # Columns: Date | Customer | Amount | Note | Status | PaidDate | TelegramID
     row = [date, customer, amount, note, "pending", "", telegram_id]
@@ -740,9 +744,13 @@ def delete_debt(row_num: int) -> bool:
 
 
 def get_customer_telegram_id(customer: str) -> str:
-    """Get Telegram ID for a customer from their debt records"""
-    debts = get_all_debts(status='pending')
-    for d in debts:
+    """Get Telegram ID for a customer from their debt records (pending + paid)."""
+    # Check pending debts first
+    for d in get_all_debts(status='pending'):
+        if d['customer'].lower() == customer.lower() and d.get('telegram_id'):
+            return d['telegram_id']
+    # Fallback: check paid debts (preserves ID after full payment)
+    for d in get_all_debts(status='paid'):
         if d['customer'].lower() == customer.lower() and d.get('telegram_id'):
             return d['telegram_id']
     return ''
