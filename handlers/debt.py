@@ -14,6 +14,42 @@ from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 logger = logging.getLogger(__name__)
 
 
+def _resolve_customer(callback_data: str, prefix: str, context, user_id=None, payos_desc: str = '') -> str:
+    """
+    Resolve customer name with multiple fallback layers.
+    Survives bot restarts (context.user_data is in-memory only).
+    
+    Priority:
+    1. callback_data (encoded in button: prefix_ordercode_customer)
+    2. context.user_data
+    3. Telegram ID lookup from debt records
+    4. PayOS description parsing (format: 'Tra no - {customer}')
+    """
+    # 1. Parse from callback_data: prefix_{order_code}_{customer}
+    stripped = callback_data.replace(prefix, '', 1)
+    parts = stripped.split('_', 1)
+    if len(parts) == 2 and parts[1]:
+        return parts[1]
+    
+    # 2. context.user_data fallback
+    for key in ('cust_customer', 'payos_customer'):
+        val = context.user_data.get(key, '')
+        if val:
+            return val
+    
+    # 3. Telegram ID → customer lookup
+    if user_id:
+        name = sheets.get_customer_name_by_telegram_id(str(user_id))
+        if name:
+            return name
+    
+    # 4. PayOS description parsing: "Tra no - Anh Hieu"
+    if payos_desc and ' - ' in payos_desc:
+        return payos_desc.split(' - ', 1)[1].strip()
+    
+    return ''
+
+
 # Conversation states
 NO_CUSTOMER, NO_AMOUNT, NO_NOTE, NO_TELEGRAM_ID = range(4)
 TRANO_SELECT = 10
@@ -497,7 +533,7 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         keyboard = [
             [InlineKeyboardButton("🏦 APP NGÂN HÀNG", url=result['checkout_url'])],
-            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"debt_checkpay_{result['order_code']}")],
+            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"debt_checkpay_{result['order_code']}_{customer[:15]}")],
             [InlineKeyboardButton("❌ Hủy đơn", callback_data=f"debt_cancelqr_{customer[:15]}")],
         ]
         
@@ -571,7 +607,9 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Kiểm tra trạng thái thanh toán PayOS"""
     query = update.callback_query
     
-    order_code_str = query.data.replace("debt_checkpay_", "")
+    raw_data = query.data.replace("debt_checkpay_", "")
+    # Parse order_code (first part before _)
+    order_code_str = raw_data.split('_', 1)[0]
     
     try:
         from services.payos_service import check_payment_status
@@ -579,7 +617,10 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         order_code = int(order_code_str)
         result = check_payment_status(order_code)
         
-        customer = context.user_data.get('payos_customer', '')
+        customer = _resolve_customer(
+            query.data, 'debt_checkpay_', context,
+            payos_desc=result.get('description', '')
+        )
         chat_id = query.message.chat_id
         
         if result['status'] == 'PAID':
@@ -1053,7 +1094,7 @@ async def cust_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = [
             [InlineKeyboardButton("🏦 MỞ APP NGÂN HÀNG", url=result['checkout_url'])],
-            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"custcheck_{result['order_code']}")],
+            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"custcheck_{result['order_code']}_{customer[:15]}")],
             [InlineKeyboardButton("❌ Hủy", callback_data=f"custcancel_{customer[:15]}")],
         ]
         
@@ -1119,7 +1160,9 @@ async def cust_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Khách kiểm tra trạng thái thanh toán"""
     query = update.callback_query
     
-    order_code_str = query.data.replace("custcheck_", "")
+    raw_data = query.data.replace("custcheck_", "")
+    # Parse order_code (first part before _)
+    order_code_str = raw_data.split('_', 1)[0]
     
     try:
         from services.payos_service import check_payment_status
@@ -1127,7 +1170,11 @@ async def cust_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_code = int(order_code_str)
         result = check_payment_status(order_code)
         
-        customer = context.user_data.get('cust_customer', '')
+        customer = _resolve_customer(
+            query.data, 'custcheck_', context,
+            user_id=query.from_user.id,
+            payos_desc=result.get('description', '')
+        )
         chat_id = query.message.chat_id
         
         if result['status'] == 'PAID':

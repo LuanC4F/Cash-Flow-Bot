@@ -291,4 +291,5 @@ def check_payment_status(order_code: int) -> dict:
         "status": data.get("status", "UNKNOWN"),
         "amount": data.get("amount", 0),
         "order_code": order_code,
+        "description": data.get("description", ""),
     }
