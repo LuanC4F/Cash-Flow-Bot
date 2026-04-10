@@ -50,6 +50,137 @@ def _resolve_customer(callback_data: str, prefix: str, context, user_id=None, pa
     return ''
 
 
+# ==================== AUTO-POLL THANH TOÁN ====================
+# Tự động kiểm tra PayOS mỗi 15 giây sau khi tạo QR.
+# Không cần bấm "Kiểm Tra" thủ công nữa.
+
+POLL_INTERVAL = 15   # seconds
+POLL_TIMEOUT = 120   # max iterations (15s × 120 = 30 phút)
+
+
+def _start_payment_poll(context, order_code: int, customer: str, 
+                        chat_id: int, qr_message_id: int = None,
+                        is_customer: bool = False):
+    """Bắt đầu auto-poll PayOS sau khi tạo QR thanh toán."""
+    job_name = f"payment_poll_{order_code}"
+    
+    # Cancel any existing poll for this order
+    _cancel_payment_poll(context, order_code)
+    
+    context.job_queue.run_repeating(
+        callback=_poll_payment_callback,
+        interval=POLL_INTERVAL,
+        first=POLL_INTERVAL,
+        data={
+            'order_code': order_code,
+            'customer': customer,
+            'chat_id': chat_id,
+            'qr_message_id': qr_message_id,
+            'is_customer': is_customer,
+            'poll_count': 0,
+        },
+        name=job_name,
+    )
+    logger.info(f"Started payment poll: {job_name} for {customer}")
+
+
+def _cancel_payment_poll(context, order_code: int):
+    """Hủy background poll cho 1 đơn hàng."""
+    job_name = f"payment_poll_{order_code}"
+    jobs = context.job_queue.get_jobs_by_name(job_name)
+    for job in jobs:
+        job.schedule_removal()
+    if jobs:
+        logger.info(f"Cancelled payment poll: {job_name}")
+
+
+async def _poll_payment_callback(context):
+    """Background job: kiểm tra PayOS status tự động."""
+    job = context.job
+    data = job.data
+    
+    # Timeout check
+    data['poll_count'] = data.get('poll_count', 0) + 1
+    if data['poll_count'] > POLL_TIMEOUT:
+        logger.info(f"Payment poll timeout: order {data['order_code']}")
+        job.schedule_removal()
+        return
+    
+    order_code = data['order_code']
+    customer = data['customer']
+    
+    try:
+        from services.payos_service import check_payment_status
+        result = check_payment_status(order_code)
+        
+        if result['status'] == 'PAID':
+            # Kiểm tra nợ còn pending không (tránh xử lý trùng nếu đã bấm nút)
+            remaining = sheets.get_customer_total_debt(customer)
+            if remaining <= 0:
+                job.schedule_removal()
+                return
+            
+            await _handle_auto_paid(context, data, result)
+            job.schedule_removal()
+            
+        elif result['status'] in ('CANCELLED', 'EXPIRED'):
+            logger.info(f"Payment {result['status']}: order {order_code}")
+            job.schedule_removal()
+            
+    except Exception as e:
+        logger.error(f"Payment poll error (order {order_code}): {e}")
+
+
+async def _handle_auto_paid(context, job_data: dict, payos_result: dict):
+    """Xử lý khi auto-poll phát hiện thanh toán thành công."""
+    order_code = job_data['order_code']
+    customer = job_data['customer']
+    chat_id = job_data['chat_id']
+    qr_message_id = job_data.get('qr_message_id')
+    is_customer = job_data.get('is_customer', False)
+    amount = payos_result['amount']
+    
+    # Đánh dấu nợ đã trả
+    count = sheets.mark_customer_debts_paid(customer)
+    if count == 0:
+        return
+    
+    logger.info(f"Auto-paid: {customer}, {format_currency(amount)}, {count} debts")
+    
+    # Xóa QR message cũ
+    if qr_message_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=qr_message_id)
+        except Exception:
+            pass
+    
+    # Gửi thông báo thành công vào chat chứa QR
+    if is_customer:
+        # Customer chat: thông báo ngắn gọn
+        text = f"✅ THANH TOÁN THÀNH CÔNG!\n\n"
+        text += f"👤 {customer}\n"
+        text += f"💰 {format_currency(amount)}\n\n"
+        text += f"🎉 Đã thanh toán {count} khoản nợ.\nCảm ơn bạn! 🙏"
+        await context.bot.send_message(chat_id=chat_id, text=text)
+    else:
+        # Admin chat: thông báo chi tiết + keyboard
+        text = f"✅ ĐÃ THANH TOÁN! (tự động phát hiện)\n\n"
+        text += f"👤 Khách: {customer}\n"
+        text += f"💰 Số tiền: {format_currency(amount)}\n"
+        text += f"📋 Mã đơn: {order_code}\n\n"
+        text += f"🎉 Đã đánh dấu {count} khoản nợ đã trả!"
+        await context.bot.send_message(
+            chat_id=chat_id, text=text, reply_markup=get_debt_keyboard()
+        )
+    
+    # Thông báo admin (chỉ khi QR từ customer — admin đã thấy ở chat của mình rồi)
+    if is_customer:
+        await _notify_admin_debt_paid(
+            context, customer, amount, order_code, count,
+            source='auto_detect'
+        )
+
+
 # Conversation states
 NO_CUSTOMER, NO_AMOUNT, NO_NOTE, NO_TELEGRAM_ID = range(4)
 TRANO_SELECT = 10
@@ -598,6 +729,16 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.message.delete()
         except Exception:
             pass
+        
+        # 🔄 Auto-poll: tự động phát hiện thanh toán
+        _start_payment_poll(
+            context,
+            order_code=result['order_code'],
+            customer=customer,
+            chat_id=chat_id,
+            qr_message_id=qr_msg.message_id if qr_msg else None,
+            is_customer=False,
+        )
     
     except Exception as e:
         await query.edit_message_text(f"❌ Lỗi tạo QR: {str(e)}", reply_markup=get_back_keyboard())
@@ -624,6 +765,9 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         chat_id = query.message.chat_id
         
         if result['status'] == 'PAID':
+            # Hủy auto-poll nếu đang chạy
+            _cancel_payment_poll(context, order_code)
+            
             # ✅ Thanh toán thành công → xóa QR + cập nhật sheet
             try:
                 await query.message.delete()
@@ -660,6 +804,8 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         
         elif result['status'] == 'CANCELLED':
+            _cancel_payment_poll(context, order_code)
+            
             # ❌ Đã hủy → xóa QR
             try:
                 await query.message.delete()
@@ -709,6 +855,11 @@ async def debt_cancel_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.delete()
     except Exception:
         pass
+    
+    # Hủy auto-poll
+    order_code = context.user_data.get('payos_order')
+    if order_code:
+        _cancel_payment_poll(context, order_code)
     
     # Dọn dẹp user_data
     context.user_data.pop('payos_order', None)
@@ -1149,6 +1300,16 @@ async def cust_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.delete()
         except Exception:
             pass
+        
+        # 🔄 Auto-poll: tự động phát hiện thanh toán
+        _start_payment_poll(
+            context,
+            order_code=result['order_code'],
+            customer=customer,
+            chat_id=chat_id,
+            qr_message_id=qr_msg.message_id if qr_msg else None,
+            is_customer=True,
+        )
     
     except Exception as e:
         await query.edit_message_text(
@@ -1178,6 +1339,9 @@ async def cust_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = query.message.chat_id
         
         if result['status'] == 'PAID':
+            # Hủy auto-poll nếu đang chạy
+            _cancel_payment_poll(context, order_code)
+            
             # Xóa QR
             try:
                 await query.message.delete()
@@ -1206,6 +1370,8 @@ async def cust_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop('cust_customer', None)
         
         elif result['status'] == 'CANCELLED':
+            _cancel_payment_poll(context, order_code)
+            
             try:
                 await query.message.delete()
             except Exception:
@@ -1247,6 +1413,11 @@ async def cust_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.delete()
     except Exception:
         pass
+    
+    # Hủy auto-poll
+    order_code = context.user_data.get('cust_order')
+    if order_code:
+        _cancel_payment_poll(context, order_code)
     
     await context.bot.send_message(
         chat_id=chat_id,
@@ -1309,6 +1480,7 @@ async def _notify_admin_debt_paid(context, customer: str, amount: float,
         source_label = {
             'admin_check': '🔄 Admin kiểm tra',
             'customer_self_pay': '💳 Khách tự thanh toán',
+            'auto_detect': '⚡ Tự động phát hiện',
         }.get(source, '❓ Không rõ')
         
         # Lấy chi tiết nợ đã trả (đã được mark paid)
