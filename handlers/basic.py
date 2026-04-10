@@ -90,7 +90,7 @@ def get_sales_keyboard():
 
 
 def get_stats_keyboard():
-    """Keyboard thống kê - 2 buttons/hàng"""
+    """Keyboard thống kê - có nút tháng cũ"""
     keyboard = [
         [
             InlineKeyboardButton("📅 Hôm Nay", callback_data="stats_today"),
@@ -98,6 +98,9 @@ def get_stats_keyboard():
         ],
         [
             InlineKeyboardButton("💹 Lợi Nhuận", callback_data="stats_profit"),
+            InlineKeyboardButton("📂 Tháng Cũ", callback_data="stats_months"),
+        ],
+        [
             InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
@@ -641,5 +644,74 @@ Xem báo cáo thu chi và lợi nhuận:
             text += f"{balance_emoji} *Còn lại: {format_currency(balance)}*"
             
             await safe_edit(query, text, get_stats_keyboard())
+        except Exception as e:
+            await safe_edit(query, f"❌ Lỗi: `{str(e)}`", get_back_keyboard())
+    
+    # Danh sách tháng cũ
+    elif data == "stats_months":
+        from services import sheets
+        from utils.formatting import get_month_name
+        
+        try:
+            available = sheets.get_available_months()
+            
+            if not available:
+                await query.answer("❌ Không có dữ liệu tháng cũ.", show_alert=True)
+                return
+            
+            text = "📂 *THỐNG KÊ THÁNG CŨ*\n\n"
+            text += "Chọn tháng để xem báo cáo:"
+            
+            keyboard = []
+            # 2 buttons per row
+            row = []
+            for item in available:
+                m, y = item['month'], item['year']
+                label = f"📅 {get_month_name(m)}/{y}"
+                row.append(InlineKeyboardButton(label, callback_data=f"stats_histmonth_{m}_{y}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("🔙 Thống Kê", callback_data="menu_thongke")])
+            
+            await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            await safe_edit(query, f"❌ Lỗi: `{str(e)}`", get_back_keyboard())
+    
+    # Thống kê tháng cũ cụ thể
+    elif data.startswith("stats_histmonth_"):
+        from services import sheets
+        from utils.formatting import format_currency, get_month_name
+        
+        try:
+            parts = data.replace("stats_histmonth_", "").split("_")
+            month = int(parts[0])
+            year = int(parts[1])
+            month_name = get_month_name(month)
+            
+            expense_summary = sheets.get_month_expense_summary(month, year)
+            sales_summary = sheets.get_month_sales_summary(month, year)
+            
+            balance = sales_summary['total_profit'] - expense_summary['total']
+            balance_emoji = "📈" if balance >= 0 else "📉"
+            
+            text = f"📅 *TỔNG KẾT {month_name.upper()}/{year}*\n\n"
+            text += f"━━━ *💰 Thu nhập* ━━━\n"
+            text += f"🛒 Bán: {sales_summary['sale_count']} | Doanh thu: {format_currency(sales_summary['total_revenue'])}\n"
+            text += f"📈 Lợi nhuận: {format_currency(sales_summary['total_profit'])}\n\n"
+            text += f"━━━ *💸 Chi tiêu* ━━━\n"
+            text += f"📊 Số lần: {expense_summary['count']} | 💸 Tổng: {format_currency(expense_summary['total'])}\n\n"
+            text += f"━━━━━━━━━━━━━━━━━\n"
+            text += f"{balance_emoji} *Còn lại: {format_currency(balance)}*"
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Tháng Cũ", callback_data="stats_months")],
+                [InlineKeyboardButton("🔙 Thống Kê", callback_data="menu_thongke")],
+            ])
+            
+            await safe_edit(query, text, keyboard)
         except Exception as e:
             await safe_edit(query, f"❌ Lỗi: `{str(e)}`", get_back_keyboard())

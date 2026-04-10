@@ -587,6 +587,56 @@ def delete_expense(row_num: int) -> bool:
         return False
 
 
+# ==================== AVAILABLE MONTHS ====================
+
+def get_available_months() -> List[Dict]:
+    """
+    Get all months that have saved data (Sales or Expenses).
+    Returns sorted list of {month, year} dicts, newest first.
+    Excludes current month (already has its own button).
+    """
+    months_set = set()
+    
+    # Scan Sales sheet
+    try:
+        sales_sheet = get_client().worksheet(config.SHEET_SALES)
+        for row in safe_get_records(sales_sheet):
+            date_str = row.get('Date', '')
+            if date_str:
+                try:
+                    dt = datetime.strptime(date_str, '%d/%m/%Y')
+                    months_set.add((dt.month, dt.year))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    
+    # Scan Expenses sheet
+    try:
+        expense_sheet = get_client().worksheet(config.SHEET_EXPENSES)
+        for row in safe_get_records(expense_sheet):
+            date_str = row.get('Date', '')
+            if date_str:
+                try:
+                    dt = datetime.strptime(date_str, '%d/%m/%Y')
+                    months_set.add((dt.month, dt.year))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    
+    # Exclude current month
+    now = datetime.now(config.VN_TIMEZONE)
+    current = (now.month, now.year)
+    months_set.discard(current)
+    
+    # Sort newest first
+    result = [{'month': m, 'year': y} for m, y in months_set]
+    result.sort(key=lambda x: (x['year'], x['month']), reverse=True)
+    
+    return result
+
+
 # ==================== DEBT MANAGEMENT ====================
 
 def add_debt(customer: str, amount: float, note: str = "", telegram_id: str = "") -> Dict:
