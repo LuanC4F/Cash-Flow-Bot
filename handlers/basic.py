@@ -521,12 +521,21 @@ Xem báo cáo thu chi và lợi nhuận:
             summary = sheets.get_month_sales_summary()
             month_name = get_month_name(summary['month'])
             
+            expense_summary = sheets.get_month_expense_summary()
+            work_expense = sum(
+                v for k, v in expense_summary['by_category'].items()
+                if k.lower() == 'work'
+            )
+            net_profit = summary['total_profit'] - work_expense
+            
             text = f"💹 LỢI NHUẬN {month_name.upper()}/{summary['year']}\n\n"
             text += f"🛒 Số lần bán: {summary['sale_count']}\n"
             text += f"📦 Tổng SP: {summary['total_quantity']}\n"
             text += f"💰 Doanh thu: {format_currency(summary['total_revenue'])}\n"
             text += f"━━━━━━━━━━━━━━━━━\n"
-            text += f"📈 Lợi nhuận: {format_currency(summary['total_profit'])}\n"
+            text += f"📈 Lãi gộp: {format_currency(summary['total_profit'])}\n"
+            text += f"💼 Chi phí CV: -{format_currency(work_expense)}\n"
+            text += f"📊 *Lợi nhuận: {format_currency(net_profit)}*\n"
             
             # Thêm doanh thu theo ngày
             if summary.get('by_day'):
@@ -825,12 +834,21 @@ Xem báo cáo thu chi và lợi nhuận:
             
             summary = sheets.get_month_sales_summary(month, year)
             
+            expense_summary = sheets.get_month_expense_summary(month, year)
+            work_expense = sum(
+                v for k, v in expense_summary['by_category'].items()
+                if k.lower() == 'work'
+            )
+            net_profit = summary['total_profit'] - work_expense
+            
             text = f"💹 LỢI NHUẬN {month_name.upper()}/{year}\n\n"
             text += f"🛒 Số lần bán: {summary['sale_count']}\n"
             text += f"📦 Tổng SP: {summary['total_quantity']}\n"
             text += f"💰 Doanh thu: {format_currency(summary['total_revenue'])}\n"
             text += f"━━━━━━━━━━━━━━━━━\n"
-            text += f"📈 Lợi nhuận: {format_currency(summary['total_profit'])}\n"
+            text += f"📈 Lãi gộp: {format_currency(summary['total_profit'])}\n"
+            text += f"💼 Chi phí CV: -{format_currency(work_expense)}\n"
+            text += f"📊 *Lợi nhuận: {format_currency(net_profit)}*\n"
             
             if summary.get('by_day'):
                 text += "\n📅 Theo ngày:\n"
