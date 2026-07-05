@@ -207,6 +207,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown',
             reply_markup=get_user_expense_menu()
         )
+        await _notify_admin_customer_start(context, user, debts)
         return
     
     # Khách nợ (không có expense access)
@@ -242,6 +243,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📱 ID của bạn: `{user.id}`",
         parse_mode='Markdown'
     )
+    await _notify_admin_customer_start(context, user, debts)
 
 
 async def _notify_admin_customer_start(context, user, debts):
