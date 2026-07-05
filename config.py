@@ -21,6 +21,7 @@ SHEET_SALES = os.getenv("SHEET_SALES", "Sales")
 SHEET_EXPENSES = os.getenv("SHEET_EXPENSES", "Expenses")
 SHEET_DEBTS = os.getenv("SHEET_DEBTS", "Debts")
 SHEET_CUSTOMERS = os.getenv("SHEET_CUSTOMERS", "Customers")
+SHEET_EXPENSE_USERS = os.getenv("SHEET_EXPENSE_USERS", "ExpenseUsers")
 
 # Bảo mật: Chỉ cho phép user ID này sử dụng bot
 # Để lấy ID: chat với @userinfobot trên Telegram

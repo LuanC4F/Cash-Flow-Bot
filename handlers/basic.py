@@ -25,6 +25,9 @@ def get_main_menu_keyboard():
         ],
         [
             InlineKeyboardButton("📊 Thống Kê", callback_data="menu_thongke"),
+            InlineKeyboardButton("👥 Quản Lý User", callback_data="admin_users"),
+        ],
+        [
             InlineKeyboardButton("❓ Hướng Dẫn", callback_data="menu_help"),
         ]
     ]
@@ -132,53 +135,12 @@ from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý lệnh /start"""
+    """Xử lý lệnh /start - phân quyền 3 cấp"""
     user = update.effective_user
     
-    # Non-admin: check nợ + cho phép thanh toán
-    if not check_permission(user.id):
-        from services import sheets
-        from utils.formatting import format_currency
-        
-        tid = str(user.id)
-        debts = sheets.get_debts_by_telegram_id(tid)
-        
-        if debts:
-            customer = debts[0]['customer']
-            total = sum(d['amount'] for d in debts)
-            
-            text = f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
-            text += f"📋 *CÔNG NỢ HIỆN TẠI*\n"
-            text += f"👤 {customer}\n\n"
-            
-            for d in debts:
-                note_text = f" - {d['note']}" if d['note'] else ""
-                text += f"• {d['date']}: {format_currency(d['amount'])}{note_text}\n"
-            
-            text += f"\n━━━━━━━━━━━━━━━━━\n"
-            text += f"💰 *Tổng nợ: {format_currency(total)}*"
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"💳 Thanh Toán {format_currency(total)}", callback_data=f"custpay_{customer[:15]}")],
-                [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data="cust_refresh")],
-            ])
-            
-            await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
-        else:
-            await update.message.reply_text(
-                f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
-                f"Bot này được sử dụng để quản lý thanh toán.\n"
-                f"Hiện bạn không có khoản nợ nào.\n\n"
-                f"📱 ID của bạn: `{user.id}`",
-                parse_mode='Markdown'
-            )
-        
-        # 🔔 Thông báo admin khi khách /start bot
-        await _notify_admin_customer_start(context, user, debts)
-        return
-    
-    # Admin: hiện menu đầy đủ
-    welcome_message = f"""
+    # Admin: menu đầy đủ
+    if check_permission(user.id):
+        welcome_message = f"""
 🎉 *Chào mừng {user.first_name or 'bạn'}!*
 
 *CashFlow Bot* - Quản lý thu chi & tính lãi bán hàng tự động.
@@ -186,11 +148,99 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ━━━━━━━━━━━━━━━━━
 📌 *Chọn chức năng bên dưới:*
 """
+        await update.message.reply_text(
+            welcome_message, 
+            parse_mode='Markdown',
+            reply_markup=get_main_menu_keyboard()
+        )
+        return
     
+    # Non-admin: check expense user + debt
+    from services import sheets
+    from utils.formatting import format_currency
+    from utils.security import is_expense_user
+    
+    tid = str(user.id)
+    has_expense = is_expense_user(user.id)
+    debts = sheets.get_debts_by_telegram_id(tid)
+    
+    # Expense user + có nợ: hiện cả 2
+    if has_expense and debts:
+        from handlers.user_expense import get_user_expense_menu
+        
+        customer = debts[0]['customer']
+        total = sum(d['amount'] for d in debts)
+        
+        text = f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
+        text += f"📋 *CÔNG NỢ HIỆN TẠI*\n👤 {customer}\n\n"
+        for d in debts:
+            note_text = f" - {d['note']}" if d['note'] else ""
+            text += f"• {d['date']}: {format_currency(d['amount'])}{note_text}\n"
+        text += f"\n━━━━━━━━━━━━━━━━━\n"
+        text += f"💰 *Tổng nợ: {format_currency(total)}*\n\n"
+        text += "📌 *Chọn chức năng bên dưới:*"
+        
+        keyboard = [
+            [InlineKeyboardButton(f"💳 Thanh Toán {format_currency(total)}", callback_data=f"custpay_{customer[:15]}")],
+            [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data="cust_refresh")],
+        ]
+        # Add expense menu buttons
+        keyboard.append([InlineKeyboardButton("💸 Ghi Chi Tiêu", callback_data="uexp_add")])
+        keyboard.append([
+            InlineKeyboardButton("📋 Hôm Nay", callback_data="uexp_today"),
+            InlineKeyboardButton("📊 Tháng Này", callback_data="uexp_month"),
+        ])
+        keyboard.append([InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="uexp_delete")])
+        
+        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        await _notify_admin_customer_start(context, user, debts)
+        return
+    
+    # Expense user only (không nợ)
+    if has_expense:
+        from handlers.user_expense import get_user_expense_menu
+        
+        await update.message.reply_text(
+            f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
+            f"💸 *CHI TIÊU CỦA BẠN*\n\n"
+            f"📌 Chọn chức năng bên dưới:",
+            parse_mode='Markdown',
+            reply_markup=get_user_expense_menu()
+        )
+        return
+    
+    # Khách nợ (không có expense access)
+    if debts:
+        customer = debts[0]['customer']
+        total = sum(d['amount'] for d in debts)
+        
+        text = f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
+        text += f"📋 *CÔNG NỢ HIỆN TẠI*\n"
+        text += f"👤 {customer}\n\n"
+        
+        for d in debts:
+            note_text = f" - {d['note']}" if d['note'] else ""
+            text += f"• {d['date']}: {format_currency(d['amount'])}{note_text}\n"
+        
+        text += f"\n━━━━━━━━━━━━━━━━━\n"
+        text += f"💰 *Tổng nợ: {format_currency(total)}*"
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"💳 Thanh Toán {format_currency(total)}", callback_data=f"custpay_{customer[:15]}")],
+            [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data="cust_refresh")],
+        ])
+        
+        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
+        await _notify_admin_customer_start(context, user, debts)
+        return
+    
+    # User lạ: không có quyền gì
     await update.message.reply_text(
-        welcome_message, 
-        parse_mode='Markdown',
-        reply_markup=get_main_menu_keyboard()
+        f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
+        f"Bot này được sử dụng để quản lý thanh toán.\n"
+        f"Hiện bạn không có khoản nợ nào.\n\n"
+        f"📱 ID của bạn: `{user.id}`",
+        parse_mode='Markdown'
     )
 
 
@@ -357,6 +407,51 @@ Xem báo cáo thu chi và lợi nhuận:
 • `1m` = 1,000,000đ
 """
         await safe_edit(query, help_text, get_back_keyboard())
+    
+    # Admin: Quản lý Expense Users
+    elif data == "admin_users":
+        from services import sheets
+        users = sheets.get_expense_users()
+        
+        text = "👥 *QUẢN LÝ USER CHI TIÊU*\n\n"
+        
+        if users:
+            for u in users:
+                status_icon = "✅" if u['status'] == 'active' else "❌"
+                text += f"{status_icon} {u['name']} (`{u['telegram_id']}`)\n"
+        else:
+            text += "📭 Chưa có user nào.\n"
+        
+        text += "\n━━━━━━━━━━━━━━━━━\n"
+        text += "➕ Để cấp quyền: `/capquyen <TelegramID> <Tên>`\n"
+        text += "➖ Bấm nút để thu hồi quyền"
+        
+        keyboard = []
+        active_users = [u for u in users if u['status'] == 'active']
+        for u in active_users:
+            keyboard.append([InlineKeyboardButton(
+                f"❌ Thu hồi: {u['name']}", 
+                callback_data=f"admin_rmuser_{u['telegram_id']}"
+            )])
+        keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="menu_main")])
+        
+        await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
+    
+    elif data.startswith("admin_rmuser_"):
+        from services import sheets
+        tid = data.replace("admin_rmuser_", "")
+        
+        success = sheets.remove_expense_user(tid)
+        if success:
+            text = f"✅ Đã thu hồi quyền chi tiêu của user `{tid}`.\nSheet data vẫn giữ nguyên."
+        else:
+            text = f"❌ Không tìm thấy user `{tid}`."
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quản Lý User", callback_data="admin_users")],
+            [InlineKeyboardButton("🔙 Menu", callback_data="menu_main")],
+        ])
+        await safe_edit(query, text, keyboard)
     
     # ===== ACTIONS =====
     

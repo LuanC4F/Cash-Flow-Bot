@@ -87,15 +87,16 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 
 # ==================== BẢO MẬT TOÀN CỤC ====================
-from utils.security import check_permission, UNAUTHORIZED_MESSAGE as SEC_UNAUTHORIZED
+from utils.security import check_permission, is_expense_user, UNAUTHORIZED_MESSAGE as SEC_UNAUTHORIZED
 
 
 async def global_permission_check(update: Update, context):
     """
-    Chặn TẤT CẢ user không phải admin.
-    Chỉ cho phép:
-    - /start (để bot ghi nhận user, gửi đòi nợ sau)
-    - custpay_, custcheck_, custcancel_ (khách tự thanh toán)
+    Chặn user không phải admin.
+    Cho phép:
+    - /start (để bot ghi nhận user)
+    - custpay_, custcheck_, custcancel_ (khách thanh toán)
+    - uexp_, ucat_, uexp_menu (expense users)
     """
     user = update.effective_user
     if not user:
@@ -105,7 +106,7 @@ async def global_permission_check(update: Update, context):
     if check_permission(user.id):
         return
     
-    # /start → cho phép (ghi nhận user)
+    # /start → cho phép
     if update.message and update.message.text:
         if update.message.text.startswith('/start'):
             return
@@ -114,6 +115,16 @@ async def global_permission_check(update: Update, context):
     if update.callback_query:
         data = update.callback_query.data or ''
         if data.startswith(('custpay_', 'custcheck_', 'custcancel_', 'cust_refresh')):
+            return
+    
+    # Expense user: cho phép callbacks + text input
+    if is_expense_user(user.id):
+        if update.callback_query:
+            data = update.callback_query.data or ''
+            if data.startswith(('uexp_', 'ucat_')):
+                return
+        # Cho phép text input (conversation flow: nhập tiền, mô tả)
+        if update.message and update.message.text and not update.message.text.startswith('/'):
             return
     
     # Chặn tất cả còn lại
@@ -500,6 +511,87 @@ def main():
             await update.message.reply_text(f"❌ Lỗi: {e}")
     
     application.add_handler(CommandHandler("migrate", migrate_command))
+    
+    # Admin: cấp quyền chi tiêu
+    async def capquyen_command(update: Update, context):
+        from utils.security import check_permission, UNAUTHORIZED_MESSAGE
+        if not check_permission(update.effective_user.id):
+            await update.message.reply_text(UNAUTHORIZED_MESSAGE)
+            return
+        args = context.args
+        if not args or len(args) < 2:
+            await update.message.reply_text(
+                "❓ Cách dùng: `/capquyen <TelegramID> <Tên>`\n\n"
+                "Ví dụ: `/capquyen 123456789 Anh Hiếu`",
+                parse_mode='Markdown'
+            )
+            return
+        tid = args[0]
+        name = ' '.join(args[1:])
+        from services import sheets
+        try:
+            result = sheets.add_expense_user(tid, name)
+            await update.message.reply_text(
+                f"✅ Đã cấp quyền chi tiêu!\n\n"
+                f"👤 Tên: {name}\n"
+                f"📱 TID: `{tid}`\n"
+                f"📄 Sheet: `{result.get('sheet_name', f'Chi_{tid}')}`",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+    
+    application.add_handler(CommandHandler("capquyen", capquyen_command))
+    
+    # ==================== USER EXPENSE CONVERSATIONS ====================
+    from handlers.user_expense import (
+        uexp_start, uexp_select_category, uexp_amount, uexp_desc, uexp_cancel,
+        uexp_today, uexp_month, uexp_day_detail, uexp_menu,
+        uexp_delete_start, uexp_delete_confirm,
+        UEXP_AMOUNT, UEXP_DESC, UEXP_DELETE_ROW
+    )
+    
+    # Ghi chi tiêu user
+    uexp_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(uexp_start, pattern="^uexp_add$")],
+        states={
+            UEXP_AMOUNT: [
+                CallbackQueryHandler(uexp_select_category, pattern="^ucat_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_amount),
+            ],
+            UEXP_DESC: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_desc),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(uexp_cancel, pattern="^uexp_cancel$"),
+            CommandHandler("cancel", uexp_cancel),
+        ],
+        per_message=False,
+    )
+    application.add_handler(uexp_conv)
+    
+    # Xóa chi tiêu user
+    uexp_del_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(uexp_delete_start, pattern="^uexp_delete$")],
+        states={
+            UEXP_DELETE_ROW: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_delete_confirm),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(uexp_cancel, pattern="^uexp_cancel$"),
+            CommandHandler("cancel", uexp_cancel),
+        ],
+        per_message=False,
+    )
+    application.add_handler(uexp_del_conv)
+    
+    # Thống kê chi tiêu user (callbacks)
+    application.add_handler(CallbackQueryHandler(uexp_today, pattern="^uexp_today$"))
+    application.add_handler(CallbackQueryHandler(uexp_month, pattern="^uexp_month$"))
+    application.add_handler(CallbackQueryHandler(uexp_day_detail, pattern="^uexp_day_"))
+    application.add_handler(CallbackQueryHandler(uexp_menu, pattern="^uexp_menu$"))
     
     # Handler cho lệnh không xác định
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))

@@ -21,4 +21,10 @@ def is_admin(user_id: int) -> bool:
     return check_permission(user_id)
 
 
+def is_expense_user(user_id: int) -> bool:
+    """Kiểm tra user có quyền ghi chi tiêu không"""
+    from services import sheets
+    return sheets.is_expense_user(str(user_id))
+
+
 UNAUTHORIZED_MESSAGE = "🚫 Đi chỗ khác chơi, đại ca Luân mới được phép dùng bot này 👌."

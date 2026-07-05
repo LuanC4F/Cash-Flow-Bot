@@ -921,3 +921,208 @@ def set_customer_telegram_id(customer: str, telegram_id: str) -> int:
             sheet.update_cell(d['row'], 7, telegram_id)
             count += 1
     return count
+
+
+# ==================== EXPENSE USERS ====================
+
+def get_expense_users(status_filter: str = None) -> List[Dict]:
+    """Get all expense users. Optional filter: 'active' or 'inactive'."""
+    try:
+        sheet = get_client().worksheet(config.SHEET_EXPENSE_USERS)
+        records = safe_get_records(sheet)
+    except Exception:
+        return []
+    
+    users = []
+    for i, row in enumerate(records, start=2):
+        tid = str(row.get('TelegramID', '')).strip()
+        status = row.get('Status', 'active').strip().lower()
+        if tid and (status_filter is None or status == status_filter):
+            users.append({
+                'row': i,
+                'telegram_id': tid,
+                'name': row.get('Name', '').strip(),
+                'status': status,
+                'sheet_name': row.get('SheetName', '').strip()
+            })
+    return users
+
+
+def is_expense_user(telegram_id: str) -> bool:
+    """Check if a user has active expense tracking access."""
+    tid = str(telegram_id).strip()
+    for u in get_expense_users(status_filter='active'):
+        if u['telegram_id'] == tid:
+            return True
+    return False
+
+
+def get_expense_user_info(telegram_id: str) -> Optional[Dict]:
+    """Get expense user info by Telegram ID."""
+    tid = str(telegram_id).strip()
+    for u in get_expense_users():
+        if u['telegram_id'] == tid:
+            return u
+    return None
+
+
+def add_expense_user(telegram_id: str, name: str) -> Dict:
+    """Grant expense tracking access. Creates personal sheet if needed."""
+    tid = str(telegram_id).strip()
+    sheet_name = f"Chi_{tid}"
+    
+    # Check if already exists
+    existing = get_expense_user_info(tid)
+    if existing:
+        if existing['status'] == 'inactive':
+            # Reactivate
+            sheet = get_client().worksheet(config.SHEET_EXPENSE_USERS)
+            sheet.update_cell(existing['row'], 3, 'active')
+            existing['status'] = 'active'
+        return existing
+    
+    # Add to ExpenseUsers sheet
+    sheet = get_client().worksheet(config.SHEET_EXPENSE_USERS)
+    sheet.append_row([tid, name, 'active', sheet_name], value_input_option='USER_ENTERED')
+    
+    # Create personal expense sheet if not exists
+    try:
+        get_client().worksheet(sheet_name)
+    except Exception:
+        spreadsheet = get_client()
+        ws = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=4)
+        ws.append_row(['Date', 'Amount', 'Description', 'Category'], value_input_option='USER_ENTERED')
+    
+    return {'telegram_id': tid, 'name': name, 'status': 'active', 'sheet_name': sheet_name}
+
+
+def remove_expense_user(telegram_id: str) -> bool:
+    """Revoke expense tracking access (set inactive, keep sheet data)."""
+    tid = str(telegram_id).strip()
+    existing = get_expense_user_info(tid)
+    if not existing:
+        return False
+    
+    sheet = get_client().worksheet(config.SHEET_EXPENSE_USERS)
+    sheet.update_cell(existing['row'], 3, 'inactive')
+    return True
+
+
+# ==================== USER EXPENSE CRUD ====================
+
+def _get_user_sheet(telegram_id: str):
+    """Get the personal expense sheet for a user."""
+    info = get_expense_user_info(str(telegram_id).strip())
+    if not info:
+        raise ValueError("User không có quyền chi tiêu")
+    return get_client().worksheet(info['sheet_name'])
+
+
+def add_user_expense(telegram_id: str, amount: float, description: str, category: str) -> Dict:
+    """Add expense to user's personal sheet."""
+    sheet = _get_user_sheet(telegram_id)
+    date = get_local_date()
+    sheet.append_row([date, amount, description, category], value_input_option='USER_ENTERED')
+    return {'date': date, 'amount': amount, 'description': description, 'category': category}
+
+
+def get_user_today_expenses(telegram_id: str) -> List[Dict]:
+    """Get today's expenses for a user."""
+    sheet = _get_user_sheet(telegram_id)
+    records = safe_get_records(sheet)
+    today = get_local_date()
+    
+    expenses = []
+    for i, row in enumerate(records, start=2):
+        if row.get('Date', '') == today:
+            expenses.append({
+                'row': i,
+                'date': today,
+                'amount': row.get('Amount', 0),
+                'description': row.get('Description', ''),
+                'category': row.get('Category', '')
+            })
+    return expenses
+
+
+def get_user_today_expense_summary(telegram_id: str) -> Dict:
+    """Get today's expense summary for a user."""
+    expenses = get_user_today_expenses(telegram_id)
+    total = sum(e['amount'] for e in expenses)
+    by_category = {}
+    for e in expenses:
+        cat = e['category'] or 'Other'
+        by_category[cat] = by_category.get(cat, 0) + e['amount']
+    return {'count': len(expenses), 'total': total, 'by_category': by_category}
+
+
+def get_user_month_expense_summary(telegram_id: str, month: int = None, year: int = None) -> Dict:
+    """Get monthly expense summary for a user."""
+    if month is None:
+        month = datetime.now(config.VN_TIMEZONE).month
+    if year is None:
+        year = datetime.now(config.VN_TIMEZONE).year
+    
+    sheet = _get_user_sheet(telegram_id)
+    records = safe_get_records(sheet)
+    
+    total = 0
+    count = 0
+    by_category = {}
+    by_day = {}
+    
+    for row in records:
+        date_str = row.get('Date', '')
+        if date_str:
+            try:
+                dt = datetime.strptime(date_str, '%d/%m/%Y')
+                if dt.month == month and dt.year == year:
+                    amount = row.get('Amount', 0) or 0
+                    category = row.get('Category', 'Other') or 'Other'
+                    day = dt.day
+                    
+                    total += amount
+                    count += 1
+                    by_category[category] = by_category.get(category, 0) + amount
+                    by_day[day] = by_day.get(day, 0) + amount
+            except ValueError:
+                pass
+    
+    return {
+        'month': month, 'year': year,
+        'count': count, 'total': total,
+        'by_category': by_category, 'by_day': by_day
+    }
+
+
+def get_user_expenses_by_date(telegram_id: str, day: int, month: int = None, year: int = None) -> List[Dict]:
+    """Get expense details for a specific date for a user."""
+    if month is None:
+        month = datetime.now(config.VN_TIMEZONE).month
+    if year is None:
+        year = datetime.now(config.VN_TIMEZONE).year
+    
+    target_date = f"{day:02d}/{month:02d}/{year}"
+    sheet = _get_user_sheet(telegram_id)
+    records = safe_get_records(sheet)
+    
+    expenses = []
+    for i, row in enumerate(records, start=2):
+        if row.get('Date', '') == target_date:
+            expenses.append({
+                'row': i, 'date': target_date,
+                'amount': row.get('Amount', 0),
+                'description': row.get('Description', ''),
+                'category': row.get('Category', '')
+            })
+    return expenses
+
+
+def delete_user_expense(telegram_id: str, row_num: int) -> bool:
+    """Delete a user's expense by row number."""
+    try:
+        sheet = _get_user_sheet(telegram_id)
+        sheet.delete_rows(row_num)
+        return True
+    except Exception:
+        return False
