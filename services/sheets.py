@@ -925,26 +925,44 @@ def set_customer_telegram_id(customer: str, telegram_id: str) -> int:
 
 # ==================== EXPENSE USERS ====================
 
+import time
+
+_expense_users_cache = []
+_expense_users_cache_time = 0
+
 def get_expense_users(status_filter: str = None) -> List[Dict]:
     """Get all expense users. Optional filter: 'active' or 'inactive'."""
-    try:
-        sheet = get_client().worksheet(config.SHEET_EXPENSE_USERS)
-        records = safe_get_records(sheet)
-    except Exception:
-        return []
+    global _expense_users_cache, _expense_users_cache_time
     
-    users = []
-    for i, row in enumerate(records, start=2):
-        tid = str(row.get('TelegramID', '')).strip()
-        status = row.get('Status', 'active').strip().lower()
-        if tid and (status_filter is None or status == status_filter):
-            users.append({
-                'row': i,
-                'telegram_id': tid,
-                'name': row.get('Name', '').strip(),
-                'status': status,
-                'sheet_name': row.get('SheetName', '').strip()
-            })
+    # Cache for 60 seconds to avoid hitting API quota on every message/callback
+    if time.time() - _expense_users_cache_time < 60 and _expense_users_cache:
+        users = _expense_users_cache
+    else:
+        try:
+            sheet = get_client().worksheet(config.SHEET_EXPENSE_USERS)
+            records = safe_get_records(sheet)
+            
+            users = []
+            for i, row in enumerate(records, start=2):
+                tid = str(row.get('TelegramID', '')).strip()
+                status = row.get('Status', 'active').strip().lower()
+                if tid:
+                    users.append({
+                        'row': i,
+                        'telegram_id': tid,
+                        'name': row.get('Name', '').strip(),
+                        'status': status,
+                        'sheet_name': row.get('SheetName', '').strip()
+                    })
+            
+            _expense_users_cache = users
+            _expense_users_cache_time = time.time()
+        except Exception:
+            # Fallback to cache if API fails
+            users = _expense_users_cache
+    
+    if status_filter:
+        return [u for u in users if u['status'] == status_filter]
     return users
 
 
@@ -968,6 +986,9 @@ def get_expense_user_info(telegram_id: str) -> Optional[Dict]:
 
 def add_expense_user(telegram_id: str, name: str) -> Dict:
     """Grant expense tracking access. Creates personal sheet if needed."""
+    global _expense_users_cache_time
+    _expense_users_cache_time = 0
+    
     tid = str(telegram_id).strip()
     sheet_name = f"Chi_{tid}"
     
@@ -998,6 +1019,9 @@ def add_expense_user(telegram_id: str, name: str) -> Dict:
 
 def remove_expense_user(telegram_id: str) -> bool:
     """Revoke expense tracking access (set inactive, keep sheet data)."""
+    global _expense_users_cache_time
+    _expense_users_cache_time = 0
+    
     tid = str(telegram_id).strip()
     existing = get_expense_user_info(tid)
     if not existing:
