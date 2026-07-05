@@ -700,28 +700,34 @@ def update_customer_telegram_id(name: str, telegram_id: str) -> bool:
 
 
 def migrate_customers_from_debts() -> int:
-    """One-time migration: extract unique customers from Debts into Customers sheet."""
-    all_debts = get_all_debts()  # pending + paid
-    migrated = 0
-    seen = set()
+    """One-time migration: extract unique customers from Debts into Customers sheet.
+    Optimized to minimize API calls (reads sheets once each).
+    """
+    # Read all data upfront (2 API calls total)
+    all_debts = get_all_debts()
+    existing_customers = get_all_saved_customers()
+    existing_names = {c['name'].lower() for c in existing_customers}
     
+    # Collect unique new customers from debts
+    new_customers = {}  # key: lowercase name, value: (name, tid)
     for d in all_debts:
         name = d['customer'].strip()
         tid = d.get('telegram_id', '')
         key = name.lower()
         
-        if not name or key in seen:
+        if not name or key in existing_names or key in new_customers:
             continue
-        seen.add(key)
-        
-        existing = find_saved_customer(name)
-        if not existing:
-            save_customer(name, tid)
-            migrated += 1
-        elif tid and not existing['telegram_id']:
-            update_customer_telegram_id(name, tid)
+        new_customers[key] = (name, tid)
     
-    return migrated
+    if not new_customers:
+        return 0
+    
+    # Batch write all new customers at once
+    sheet = get_client().worksheet(config.SHEET_CUSTOMERS)
+    rows = [[name, tid] for name, tid in new_customers.values()]
+    sheet.append_rows(rows, value_input_option='USER_ENTERED')
+    
+    return len(rows)
 
 
 # ==================== DEBT MANAGEMENT ==
