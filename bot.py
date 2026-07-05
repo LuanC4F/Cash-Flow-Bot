@@ -60,7 +60,8 @@ from handlers.expense import (
 from handlers.debt import (
     no_command, 
     ghino_start, ghino_customer, ghino_amount, ghino_note, ghino_skip_note,
-    ghino_select_customer, ghino_telegram_id, ghino_skip_tid,
+    ghino_select_customer, ghino_more_customers, ghino_new_customer,
+    ghino_telegram_id, ghino_skip_tid,
     debt_list, debt_by_customer, debt_customer_detail, debt_summary,
     debt_create_paylink, debt_check_payment, debt_cancel_qr,
     debt_doino, debt_set_tid_start, debt_set_tid_confirm,
@@ -351,6 +352,8 @@ def main():
         states={
             NO_CUSTOMER: [
                 CallbackQueryHandler(ghino_select_customer, pattern="^debt_addto_"),
+                CallbackQueryHandler(ghino_more_customers, pattern="^debt_more_"),
+                CallbackQueryHandler(ghino_new_customer, pattern="^debt_newcust$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_customer),
             ],
             NO_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ghino_amount)],
@@ -481,6 +484,22 @@ def main():
     
     # Debt commands
     application.add_handler(CommandHandler("no", no_command))
+    
+    # Admin: migrate customers
+    async def migrate_command(update: Update, context):
+        from utils.security import check_permission, UNAUTHORIZED_MESSAGE
+        if not check_permission(update.effective_user.id):
+            await update.message.reply_text(UNAUTHORIZED_MESSAGE)
+            return
+        from services import sheets
+        await update.message.reply_text("⏳ Đang migrate khách hàng từ Debts → Customers...")
+        try:
+            count = sheets.migrate_customers_from_debts()
+            await update.message.reply_text(f"✅ Đã migrate {count} khách hàng mới vào sheet Customers!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
+    
+    application.add_handler(CommandHandler("migrate", migrate_command))
     
     # Handler cho lệnh không xác định
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))

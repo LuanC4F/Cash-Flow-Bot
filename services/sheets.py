@@ -637,20 +637,110 @@ def get_available_months() -> List[Dict]:
     return result
 
 
-# ==================== DEBT MANAGEMENT ====================
+# ==================== CUSTOMERS ====================
+
+def get_all_saved_customers() -> List[Dict]:
+    """Get all customers from Customers sheet, newest first."""
+    try:
+        sheet = get_client().worksheet(config.SHEET_CUSTOMERS)
+        records = safe_get_records(sheet)
+    except Exception:
+        return []
+    
+    customers = []
+    for i, row in enumerate(records, start=2):
+        name = row.get('Name', '').strip()
+        if name:
+            customers.append({
+                'row': i,
+                'name': name,
+                'telegram_id': str(row.get('TelegramID', '')).strip()
+            })
+    
+    # Newest first (highest row = most recently added)
+    customers.reverse()
+    return customers
+
+
+def find_saved_customer(name: str) -> Optional[Dict]:
+    """Find a customer by name (case-insensitive)."""
+    for c in get_all_saved_customers():
+        if c['name'].lower() == name.lower():
+            return c
+    return None
+
+
+def save_customer(name: str, telegram_id: str = '') -> Dict:
+    """Save customer to Customers sheet. Updates TID if customer already exists."""
+    existing = find_saved_customer(name)
+    
+    if existing:
+        # Update TID if we have a new one and old one is empty
+        if telegram_id and not existing['telegram_id']:
+            sheet = get_client().worksheet(config.SHEET_CUSTOMERS)
+            sheet.update_cell(existing['row'], 2, telegram_id)
+            existing['telegram_id'] = telegram_id
+        return existing
+    
+    # New customer
+    sheet = get_client().worksheet(config.SHEET_CUSTOMERS)
+    sheet.append_row([name, telegram_id], value_input_option='USER_ENTERED')
+    return {'name': name, 'telegram_id': telegram_id}
+
+
+def update_customer_telegram_id(name: str, telegram_id: str) -> bool:
+    """Update Telegram ID for an existing customer."""
+    existing = find_saved_customer(name)
+    if not existing:
+        return False
+    
+    sheet = get_client().worksheet(config.SHEET_CUSTOMERS)
+    sheet.update_cell(existing['row'], 2, telegram_id)
+    return True
+
+
+def migrate_customers_from_debts() -> int:
+    """One-time migration: extract unique customers from Debts into Customers sheet."""
+    all_debts = get_all_debts()  # pending + paid
+    migrated = 0
+    seen = set()
+    
+    for d in all_debts:
+        name = d['customer'].strip()
+        tid = d.get('telegram_id', '')
+        key = name.lower()
+        
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        
+        existing = find_saved_customer(name)
+        if not existing:
+            save_customer(name, tid)
+            migrated += 1
+        elif tid and not existing['telegram_id']:
+            update_customer_telegram_id(name, tid)
+    
+    return migrated
+
+
+# ==================== DEBT MANAGEMENT ==
 
 def add_debt(customer: str, amount: float, note: str = "", telegram_id: str = "") -> Dict:
-    """Add new debt record. Auto-populates Telegram ID from history if not provided."""
+    """Add new debt record. Auto-populates Telegram ID and saves customer."""
     sheet = get_client().worksheet(config.SHEET_DEBTS)
     date = get_local_date()
     
-    # Auto-populate Telegram ID from past records if not provided
+    # Auto-populate Telegram ID from Customers sheet first, then Debts
     if not telegram_id:
         telegram_id = get_customer_telegram_id(customer)
     
     # Columns: Date | Customer | Amount | Note | Status | PaidDate | TelegramID
     row = [date, customer, amount, note, "pending", "", telegram_id]
     sheet.append_row(row, value_input_option='USER_ENTERED')
+    
+    # Auto-save to Customers sheet
+    save_customer(customer, telegram_id)
     
     return {
         'date': date,
@@ -794,12 +884,17 @@ def delete_debt(row_num: int) -> bool:
 
 
 def get_customer_telegram_id(customer: str) -> str:
-    """Get Telegram ID for a customer from their debt records (pending + paid)."""
-    # Check pending debts first
+    """Get Telegram ID: Customers sheet first, then Debts fallback."""
+    # 1. Check Customers sheet (permanent storage)
+    saved = find_saved_customer(customer)
+    if saved and saved.get('telegram_id'):
+        return saved['telegram_id']
+    
+    # 2. Fallback: check pending debts
     for d in get_all_debts(status='pending'):
         if d['customer'].lower() == customer.lower() and d.get('telegram_id'):
             return d['telegram_id']
-    # Fallback: check paid debts (preserves ID after full payment)
+    # 3. Fallback: check paid debts
     for d in get_all_debts(status='paid'):
         if d['customer'].lower() == customer.lower() and d.get('telegram_id'):
             return d['telegram_id']

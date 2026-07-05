@@ -238,46 +238,61 @@ async def no_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ==================== GHI NỢ MỚI ====================
+CUSTOMERS_PER_PAGE = 8
+
+
+def _build_customer_keyboard(customers, offset=0):
+    """Build paginated customer keyboard."""
+    page = customers[offset:offset + CUSTOMERS_PER_PAGE]
+    has_more = len(customers) > offset + CUSTOMERS_PER_PAGE
+    
+    keyboard = []
+    row = []
+    for c in page:
+        label = f"👤 {c['name'][:12]}"
+        row.append(InlineKeyboardButton(label, callback_data=f"debt_addto_{c['name'][:15]}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    
+    nav_row = []
+    if has_more:
+        nav_row.append(InlineKeyboardButton("📋 Xem thêm ▸", callback_data=f"debt_more_{offset + CUSTOMERS_PER_PAGE}"))
+    nav_row.append(InlineKeyboardButton("➕ Khách mới", callback_data="debt_newcust"))
+    keyboard.append(nav_row)
+    
+    keyboard.append([InlineKeyboardButton("❌ Hủy", callback_data="cancel_debt")])
+    return keyboard
+
 
 async def ghino_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bắt đầu ghi nợ - hiển thị khách hàng đã có hoặc tạo mới"""
+    """Bắt đầu ghi nợ - hiển thị khách đã lưu hoặc tạo mới"""
     query = update.callback_query
     if query:
         await query.answer()
         
-        # Lấy danh sách khách đang nợ
-        customers = sheets.get_all_customers_with_debt()
+        customers = sheets.get_all_saved_customers()
         
         text = "📝 GHI NỢ MỚI\n\n"
         
-        keyboard = []
-        
         if customers:
-            text += "👤 Chọn khách hàng đã có:\n\n"
-            customers.sort(key=lambda x: x['total'], reverse=True)
+            text += "👤 Chọn khách hàng hoặc tạo mới:\n\n"
+            # Show summary of displayed customers
+            for c in customers[:CUSTOMERS_PER_PAGE]:
+                debt = sheets.get_customer_total_debt(c['name'])
+                if debt > 0:
+                    text += f"• {c['name']}: đang nợ {format_currency(debt)}\n"
+                else:
+                    text += f"• {c['name']}\n"
             
-            for c in customers:
-                text += f"• {c['customer']}: {format_currency(c['total'])} ({c['count']} khoản)\n"
-            
-            # Tạo buttons cho từng khách
-            row = []
-            for c in customers[:8]:  # Tối đa 8 khách
-                row.append(InlineKeyboardButton(
-                    f"👤 {c['customer'][:12]}", 
-                    callback_data=f"debt_addto_{c['customer'][:15]}"
-                ))
-                if len(row) == 2:
-                    keyboard.append(row)
-                    row = []
-            if row:
-                keyboard.append(row)
-            
-            text += "\n━━━━━━━━━━━━━━━━━\n"
+            if len(customers) > CUSTOMERS_PER_PAGE:
+                text += f"\n... và {len(customers) - CUSTOMERS_PER_PAGE} khách khác"
+        else:
+            text += "📝 Nhập tên khách hàng mới:"
         
-        text += "📝 Hoặc nhập tên khách hàng mới:"
-        
-        keyboard.append([InlineKeyboardButton("❌ Hủy", callback_data="cancel_debt")])
+        keyboard = _build_customer_keyboard(customers, offset=0)
         
         await query.edit_message_text(
             text,
@@ -285,6 +300,51 @@ async def ghino_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         return NO_CUSTOMER
+    
+    return NO_CUSTOMER
+
+
+async def ghino_more_customers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hiển thị trang tiếp theo của danh sách khách hàng"""
+    query = update.callback_query
+    await query.answer()
+    
+    offset = int(query.data.replace("debt_more_", ""))
+    customers = sheets.get_all_saved_customers()
+    
+    text = "📝 GHI NỢ MỚI\n\n👤 Chọn khách hàng:\n\n"
+    
+    page = customers[offset:offset + CUSTOMERS_PER_PAGE]
+    for c in page:
+        debt = sheets.get_customer_total_debt(c['name'])
+        if debt > 0:
+            text += f"• {c['name']}: đang nợ {format_currency(debt)}\n"
+        else:
+            text += f"• {c['name']}\n"
+    
+    remaining = len(customers) - offset - CUSTOMERS_PER_PAGE
+    if remaining > 0:
+        text += f"\n... và {remaining} khách khác"
+    
+    keyboard = _build_customer_keyboard(customers, offset=offset)
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    
+    return NO_CUSTOMER
+
+
+async def ghino_new_customer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chọn tạo khách mới - yêu cầu nhập tên"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "📝 GHI NỢ MỚI\n\n✏️ Nhập tên khách hàng mới:",
+        reply_markup=get_cancel_keyboard()
+    )
     
     return NO_CUSTOMER
 
