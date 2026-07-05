@@ -473,7 +473,58 @@ def main():
     application.add_handler(CallbackQueryHandler(cust_cancel, pattern="^custcancel_"))
     application.add_handler(CallbackQueryHandler(cust_refresh, pattern="^cust_refresh$"))
     
-    # Callback handler cho inline buttons (menu navigation) - Phải ở cuối vì không có pattern
+    # ==================== USER EXPENSE CONVERSATIONS ====================
+    # PHẢI đăng ký TRƯỚC button_callback (vì button_callback không có pattern, bắt tất cả)
+    from handlers.user_expense import (
+        uexp_start, uexp_select_category, uexp_amount, uexp_desc, uexp_cancel,
+        uexp_today, uexp_month, uexp_day_detail, uexp_menu,
+        uexp_delete_start, uexp_delete_confirm,
+        UEXP_AMOUNT, UEXP_DESC, UEXP_DELETE_ROW
+    )
+    
+    # Ghi chi tiêu user
+    uexp_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(uexp_start, pattern="^uexp_add$")],
+        states={
+            UEXP_AMOUNT: [
+                CallbackQueryHandler(uexp_select_category, pattern="^ucat_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_amount),
+            ],
+            UEXP_DESC: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_desc),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(uexp_cancel, pattern="^uexp_cancel$"),
+            CommandHandler("cancel", uexp_cancel),
+        ],
+        per_message=False,
+    )
+    application.add_handler(uexp_conv)
+    
+    # Xóa chi tiêu user
+    uexp_del_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(uexp_delete_start, pattern="^uexp_delete$")],
+        states={
+            UEXP_DELETE_ROW: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_delete_confirm),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(uexp_cancel, pattern="^uexp_cancel$"),
+            CommandHandler("cancel", uexp_cancel),
+        ],
+        per_message=False,
+    )
+    application.add_handler(uexp_del_conv)
+    
+    # Thống kê chi tiêu user (callbacks)
+    application.add_handler(CallbackQueryHandler(uexp_today, pattern="^uexp_today$"))
+    application.add_handler(CallbackQueryHandler(uexp_month, pattern="^uexp_month$"))
+    application.add_handler(CallbackQueryHandler(uexp_day_detail, pattern="^uexp_day_"))
+    application.add_handler(CallbackQueryHandler(uexp_menu, pattern="^uexp_menu$"))
+    
+    # Callback handler cho inline buttons (menu navigation) - Phải ở CUỐI vì không có pattern
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # Command handlers (backup mode)
@@ -542,56 +593,6 @@ def main():
             await update.message.reply_text(f"❌ Lỗi: {e}")
     
     application.add_handler(CommandHandler("capquyen", capquyen_command))
-    
-    # ==================== USER EXPENSE CONVERSATIONS ====================
-    from handlers.user_expense import (
-        uexp_start, uexp_select_category, uexp_amount, uexp_desc, uexp_cancel,
-        uexp_today, uexp_month, uexp_day_detail, uexp_menu,
-        uexp_delete_start, uexp_delete_confirm,
-        UEXP_AMOUNT, UEXP_DESC, UEXP_DELETE_ROW
-    )
-    
-    # Ghi chi tiêu user
-    uexp_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(uexp_start, pattern="^uexp_add$")],
-        states={
-            UEXP_AMOUNT: [
-                CallbackQueryHandler(uexp_select_category, pattern="^ucat_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_amount),
-            ],
-            UEXP_DESC: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_desc),
-            ],
-        },
-        fallbacks=[
-            CallbackQueryHandler(uexp_cancel, pattern="^uexp_cancel$"),
-            CommandHandler("cancel", uexp_cancel),
-        ],
-        per_message=False,
-    )
-    application.add_handler(uexp_conv)
-    
-    # Xóa chi tiêu user
-    uexp_del_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(uexp_delete_start, pattern="^uexp_delete$")],
-        states={
-            UEXP_DELETE_ROW: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_delete_confirm),
-            ],
-        },
-        fallbacks=[
-            CallbackQueryHandler(uexp_cancel, pattern="^uexp_cancel$"),
-            CommandHandler("cancel", uexp_cancel),
-        ],
-        per_message=False,
-    )
-    application.add_handler(uexp_del_conv)
-    
-    # Thống kê chi tiêu user (callbacks)
-    application.add_handler(CallbackQueryHandler(uexp_today, pattern="^uexp_today$"))
-    application.add_handler(CallbackQueryHandler(uexp_month, pattern="^uexp_month$"))
-    application.add_handler(CallbackQueryHandler(uexp_day_detail, pattern="^uexp_day_"))
-    application.add_handler(CallbackQueryHandler(uexp_menu, pattern="^uexp_menu$"))
     
     # Handler cho lệnh không xác định
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))

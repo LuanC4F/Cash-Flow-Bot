@@ -930,6 +930,19 @@ import time
 _expense_users_cache = []
 _expense_users_cache_time = 0
 
+import logging as _log
+_logger = _log.getLogger(__name__)
+
+
+def _normalize_tid(raw) -> str:
+    """Normalize TelegramID from Google Sheets (may be int, float, or string)."""
+    s = str(raw).strip()
+    # Handle float like "7955498476.0" → "7955498476"
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
+
+
 def get_expense_users(status_filter: str = None) -> List[Dict]:
     """Get all expense users. Optional filter: 'active' or 'inactive'."""
     global _expense_users_cache, _expense_users_cache_time
@@ -944,20 +957,23 @@ def get_expense_users(status_filter: str = None) -> List[Dict]:
             
             users = []
             for i, row in enumerate(records, start=2):
-                tid = str(row.get('TelegramID', '')).strip()
-                status = row.get('Status', 'active').strip().lower()
+                raw_tid = row.get('TelegramID', '')
+                tid = _normalize_tid(raw_tid)
+                status = str(row.get('Status', 'active')).strip().lower()
                 if tid:
                     users.append({
                         'row': i,
                         'telegram_id': tid,
-                        'name': row.get('Name', '').strip(),
+                        'name': str(row.get('Name', '')).strip(),
                         'status': status,
-                        'sheet_name': row.get('SheetName', '').strip()
+                        'sheet_name': str(row.get('SheetName', '')).strip()
                     })
             
             _expense_users_cache = users
             _expense_users_cache_time = time.time()
-        except Exception:
+            _logger.info(f"[ExpenseUsers] Loaded {len(users)} users: {[(u['telegram_id'], u['status']) for u in users]}")
+        except Exception as e:
+            _logger.error(f"[ExpenseUsers] Failed to load: {e}")
             # Fallback to cache if API fails
             users = _expense_users_cache
     
@@ -966,18 +982,18 @@ def get_expense_users(status_filter: str = None) -> List[Dict]:
     return users
 
 
-def is_expense_user(telegram_id: str) -> bool:
+def is_expense_user(telegram_id) -> bool:
     """Check if a user has active expense tracking access."""
-    tid = str(telegram_id).strip()
-    for u in get_expense_users(status_filter='active'):
-        if u['telegram_id'] == tid:
-            return True
-    return False
+    tid = _normalize_tid(telegram_id)
+    active_users = get_expense_users(status_filter='active')
+    result = any(u['telegram_id'] == tid for u in active_users)
+    _logger.info(f"[ExpenseUsers] is_expense_user({tid}) → {result} (active: {[u['telegram_id'] for u in active_users]})")
+    return result
 
 
 def get_expense_user_info(telegram_id: str) -> Optional[Dict]:
     """Get expense user info by Telegram ID."""
-    tid = str(telegram_id).strip()
+    tid = _normalize_tid(telegram_id)
     for u in get_expense_users():
         if u['telegram_id'] == tid:
             return u
