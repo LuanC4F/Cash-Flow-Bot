@@ -10,8 +10,9 @@ from utils.formatting import format_currency, parse_amount, get_month_name, get_
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 # Conversation states
-CHI_AMOUNT, CHI_DESC = range(2)
-XOACHI_ROW = 2
+CHI_AMOUNT, CHI_DESC, CHI_DATE = range(3)
+XOACHI_ROW = 3
+SUACHI_ROW, SUACHI_FIELD, SUACHI_VALUE = range(4, 7)
 
 # Categories - text đầy đủ
 CATEGORIES = [
@@ -36,7 +37,10 @@ def get_expense_keyboard():
             InlineKeyboardButton("📊 Tháng", callback_data="expense_month"),
         ],
         [
+            InlineKeyboardButton("✏️ Sửa Chi Tiêu", callback_data="expense_edit"),
             InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="expense_delete"),
+        ],
+        [
             InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
     ]
@@ -142,15 +146,79 @@ async def chi_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def chi_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Nhận mô tả và hoàn tất"""
+    """Nhận mô tả, hỏi ngày"""
     description = update.message.text.strip()
+    context.user_data['expense_desc'] = description
     
     amount = context.user_data.get('expense_amount', 0)
     category = context.user_data.get('expense_category', 'Living')
     
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 Hôm Nay", callback_data="expense_date_today")],
+        [InlineKeyboardButton("📅 Hôm Qua", callback_data="expense_date_yesterday")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="cancel_expense")],
+    ])
+    
+    await update.message.reply_text(
+        f"✅ Mô tả: *{description}*\n\n"
+        "📅 *Chọn ngày:*\n\n"
+        "Bấm nút hoặc nhập ngày (VD: `05/07/2026`)",
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+    
+    return CHI_DATE
+
+
+async def chi_date_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chọn ngày nhanh qua button"""
+    query = update.callback_query
+    await query.answer()
+    
+    from datetime import timedelta
+    
+    if query.data == "expense_date_today":
+        date = sheets.get_local_date()
+    elif query.data == "expense_date_yesterday":
+        from datetime import datetime
+        import config
+        yesterday = datetime.now(config.VN_TIMEZONE) - timedelta(days=1)
+        date = yesterday.strftime('%d/%m/%Y')
+    else:
+        date = sheets.get_local_date()
+    
+    return await _save_expense(query, context, date)
+
+
+async def chi_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Nhập ngày thủ công"""
+    text = update.message.text.strip()
+    
+    # Validate format dd/mm/yyyy
+    from datetime import datetime
     try:
-        result = sheets.add_expense(amount, description, category)
-        
+        datetime.strptime(text, '%d/%m/%Y')
+        date = text
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Sai định dạng! Nhập lại: `dd/mm/yyyy`\n"
+            "Ví dụ: `05/07/2026`",
+            parse_mode='Markdown',
+            reply_markup=get_cancel_keyboard()
+        )
+        return CHI_DATE
+    
+    return await _save_expense_msg(update, context, date)
+
+
+async def _save_expense(query, context, date):
+    """Lưu chi tiêu từ callback query"""
+    amount = context.user_data.get('expense_amount', 0)
+    category = context.user_data.get('expense_category', 'Living')
+    description = context.user_data.get('expense_desc', '')
+    
+    try:
+        result = sheets.add_expense(amount, description, category, date=date)
         emoji = get_category_emoji(category)
         
         text = f"""✅ ĐÃ GHI CHI TIÊU!
@@ -160,19 +228,163 @@ async def chi_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {emoji} Loại: {category}
 📅 Ngày: {result['date']}
 """
-        
-        # Thêm tổng chi hôm nay
         today_summary = sheets.get_today_expense_summary()
         text += f"━━━ Chi tiêu hôm nay ━━━\n"
         text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
         
-        await update.message.reply_text(
-            text,
-            reply_markup=get_expense_keyboard()
-        )
+        await query.edit_message_text(text, reply_markup=get_expense_keyboard())
+    except Exception as e:
+        await query.edit_message_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def _save_expense_msg(update, context, date):
+    """Lưu chi tiêu từ text message"""
+    amount = context.user_data.get('expense_amount', 0)
+    category = context.user_data.get('expense_category', 'Living')
+    description = context.user_data.get('expense_desc', '')
+    
+    try:
+        result = sheets.add_expense(amount, description, category, date=date)
+        emoji = get_category_emoji(category)
         
+        text = f"""✅ ĐÃ GHI CHI TIÊU!
+
+💸 Số tiền: {format_currency(amount)}
+📝 Mô tả: {description}
+{emoji} Loại: {category}
+📅 Ngày: {result['date']}
+"""
+        today_summary = sheets.get_today_expense_summary()
+        text += f"━━━ Chi tiêu hôm nay ━━━\n"
+        text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
+        
+        await update.message.reply_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+# ==================== SỬA CHI TIÊU ====================
+
+async def suachi_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bắt đầu sửa chi tiêu - hiện danh sách hôm nay"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        try:
+            expenses = sheets.get_today_expenses()
+            if not expenses:
+                await query.edit_message_text(
+                    "✏️ *SỬA CHI TIÊU*\n\n📭 Chưa có chi tiêu nào hôm nay.",
+                    parse_mode='Markdown',
+                    reply_markup=get_expense_keyboard()
+                )
+                return ConversationHandler.END
+            
+            text = "✏️ *SỬA CHI TIÊU*\n\n📋 *Chi tiêu hôm nay:*\n"
+            for e in expenses:
+                emoji = get_category_emoji(e['category'])
+                text += f"• *Row {e['row']}*: {format_currency(e['amount'])} - {e['description']} ({e['date']})\n"
+            text += "\n⚠️ Nhập số row cần sửa:"
+            
+            await query.edit_message_text(
+                text, parse_mode='Markdown',
+                reply_markup=get_cancel_keyboard()
+            )
+            return SUACHI_ROW
+        except Exception as e:
+            await query.edit_message_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
+            return ConversationHandler.END
+    return SUACHI_ROW
+
+
+async def suachi_select_row(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chọn row → hiện menu chọn field"""
+    try:
+        row_num = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("❌ Số row không hợp lệ! Nhập lại:", reply_markup=get_cancel_keyboard())
+        return SUACHI_ROW
+    
+    context.user_data['edit_row'] = row_num
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 Sửa Ngày", callback_data="editfield_date")],
+        [InlineKeyboardButton("💸 Sửa Số Tiền", callback_data="editfield_amount")],
+        [InlineKeyboardButton("📝 Sửa Mô Tả", callback_data="editfield_description")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="cancel_expense")],
+    ])
+    
+    await update.message.reply_text(
+        f"✏️ Sửa *Row {row_num}*\n\nChọn field cần sửa:",
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+    return SUACHI_FIELD
+
+
+async def suachi_select_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chọn field → hỏi giá trị mới"""
+    query = update.callback_query
+    await query.answer()
+    
+    field = query.data.replace("editfield_", "")
+    context.user_data['edit_field'] = field
+    
+    prompts = {
+        'date': "📅 Nhập ngày mới (VD: `05/07/2026`):",
+        'amount': "💸 Nhập số tiền mới (VD: `50k`, `1.5m`):",
+        'description': "📝 Nhập mô tả mới:"
+    }
+    
+    await query.edit_message_text(
+        prompts.get(field, "Nhập giá trị mới:"),
+        parse_mode='Markdown',
+        reply_markup=get_cancel_keyboard()
+    )
+    return SUACHI_VALUE
+
+
+async def suachi_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lưu giá trị mới"""
+    row_num = context.user_data.get('edit_row')
+    field = context.user_data.get('edit_field')
+    raw = update.message.text.strip()
+    
+    # Validate
+    if field == 'date':
+        from datetime import datetime as dt
+        try:
+            dt.strptime(raw, '%d/%m/%Y')
+            value = raw
+        except ValueError:
+            await update.message.reply_text("❌ Sai định dạng! Nhập lại: `dd/mm/yyyy`", parse_mode='Markdown', reply_markup=get_cancel_keyboard())
+            return SUACHI_VALUE
+    elif field == 'amount':
+        value = parse_amount(raw)
+        if value is None:
+            await update.message.reply_text("❌ Số tiền không hợp lệ! Nhập lại:", reply_markup=get_cancel_keyboard())
+            return SUACHI_VALUE
+    else:
+        value = raw
+    
+    try:
+        success = sheets.edit_expense(row_num, field, value)
+        if success:
+            await update.message.reply_text(
+                f"✅ Đã sửa *Row {row_num}* — {field}: `{value}`",
+                parse_mode='Markdown',
+                reply_markup=get_expense_keyboard()
+            )
+        else:
+            await update.message.reply_text(f"❌ Không thể sửa.", reply_markup=get_expense_keyboard())
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}", reply_markup=get_expense_keyboard())
     
     context.user_data.clear()
     return ConversationHandler.END

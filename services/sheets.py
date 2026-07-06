@@ -435,11 +435,16 @@ def update_sale(row_num: int, quantity: int = None, price: float = None,
 
 # ==================== EXPENSES ====================
 
-def add_expense(amount: float, description: str, category: str = "Living") -> Dict:
-    """Add expense"""
+# Column mapping: A=Date, B=Amount, C=Description, D=Category
+EXPENSE_COLS = {'date': 1, 'amount': 2, 'description': 3, 'category': 4}
+
+
+def add_expense(amount: float, description: str, category: str = "Living", date: str = None) -> Dict:
+    """Add expense. If date is None, uses today."""
     sheet = get_client().worksheet(config.SHEET_EXPENSES)
     
-    date = get_local_date()
+    if date is None:
+        date = get_local_date()
     row_data = [date, amount, description, category]
     sheet.append_row(row_data)
     
@@ -449,6 +454,21 @@ def add_expense(amount: float, description: str, category: str = "Living") -> Di
         'description': description,
         'category': category
     }
+
+
+def edit_expense(row_num: int, field: str, value) -> bool:
+    """Edit a single field of an expense by row number.
+    field: 'date', 'amount', 'description'
+    """
+    col = EXPENSE_COLS.get(field)
+    if not col:
+        return False
+    try:
+        sheet = get_client().worksheet(config.SHEET_EXPENSES)
+        sheet.update_cell(row_num, col, value)
+        return True
+    except Exception:
+        return False
 
 
 def get_today_expenses() -> List[Dict]:
@@ -1058,12 +1078,26 @@ def _get_user_sheet(telegram_id: str):
     return get_client().worksheet(info['sheet_name'])
 
 
-def add_user_expense(telegram_id: str, amount: float, description: str, category: str) -> Dict:
-    """Add expense to user's personal sheet."""
+def add_user_expense(telegram_id: str, amount: float, description: str, category: str, date: str = None) -> Dict:
+    """Add expense to user's personal sheet. If date is None, uses today."""
     sheet = _get_user_sheet(telegram_id)
-    date = get_local_date()
+    if date is None:
+        date = get_local_date()
     sheet.append_row([date, amount, description, category], value_input_option='USER_ENTERED')
     return {'date': date, 'amount': amount, 'description': description, 'category': category}
+
+
+def edit_user_expense(telegram_id: str, row_num: int, field: str, value) -> bool:
+    """Edit a single field of a user's expense by row number."""
+    col = EXPENSE_COLS.get(field)
+    if not col:
+        return False
+    try:
+        sheet = _get_user_sheet(telegram_id)
+        sheet.update_cell(row_num, col, value)
+        return True
+    except Exception:
+        return False
 
 
 def get_user_today_expenses(telegram_id: str) -> List[Dict]:

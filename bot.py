@@ -50,10 +50,13 @@ from handlers.sales import (
 from handlers.expense import (
     chi_command, chitieu_command, homnay_command, thang_command, xoachi_command,
     chi_start, chi_select_category, chi_amount, chi_desc,
+    chi_date_select, chi_date_input,
     xoachi_start, xoachi_confirm,
+    suachi_start, suachi_select_row, suachi_select_field, suachi_save,
     cancel_expense,
-    CHI_AMOUNT, CHI_DESC,
-    XOACHI_ROW
+    CHI_AMOUNT, CHI_DESC, CHI_DATE,
+    XOACHI_ROW,
+    SUACHI_ROW, SUACHI_FIELD, SUACHI_VALUE
 )
 
 # Debt handlers
@@ -121,7 +124,7 @@ async def global_permission_check(update: Update, context):
     if is_expense_user(user.id):
         if update.callback_query:
             data = update.callback_query.data or ''
-            if data.startswith(('uexp_', 'ucat_')):
+            if data.startswith(('uexp_', 'ucat_', 'ueditf_')):
                 return
         # Cho phép text input (conversation flow: nhập tiền, mô tả)
         if update.message and update.message.text and not update.message.text.startswith('/'):
@@ -334,6 +337,25 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, chi_amount),
             ],
             CHI_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, chi_desc)],
+            CHI_DATE: [
+                CallbackQueryHandler(chi_date_select, pattern="^expense_date_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, chi_date_input),
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_expense, pattern="^cancel_expense$"),
+            CommandHandler("cancel", cancel_expense),
+        ],
+        per_message=False,
+    )
+    
+    # Sửa chi tiêu
+    suachi_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(suachi_start, pattern="^expense_edit$")],
+        states={
+            SUACHI_ROW: [MessageHandler(filters.TEXT & ~filters.COMMAND, suachi_select_row)],
+            SUACHI_FIELD: [CallbackQueryHandler(suachi_select_field, pattern="^editfield_")],
+            SUACHI_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, suachi_save)],
         },
         fallbacks=[
             CallbackQueryHandler(cancel_expense, pattern="^cancel_expense$"),
@@ -433,6 +455,7 @@ def main():
     application.add_handler(suabh_conv)
     application.add_handler(chi_conv)
     application.add_handler(xoachi_conv)
+    application.add_handler(suachi_conv)
     application.add_handler(ghino_conv)
     application.add_handler(trano_conv)
     application.add_handler(xoano_conv)
@@ -477,9 +500,12 @@ def main():
     # PHẢI đăng ký TRƯỚC button_callback (vì button_callback không có pattern, bắt tất cả)
     from handlers.user_expense import (
         uexp_start, uexp_select_category, uexp_amount, uexp_desc, uexp_cancel,
+        uexp_date_select, uexp_date_input,
         uexp_today, uexp_month, uexp_day_detail, uexp_menu,
         uexp_delete_start, uexp_delete_confirm,
-        UEXP_AMOUNT, UEXP_DESC, UEXP_DELETE_ROW
+        uexp_edit_start, uexp_edit_select_row, uexp_edit_select_field, uexp_edit_save,
+        UEXP_AMOUNT, UEXP_DESC, UEXP_DATE, UEXP_DELETE_ROW,
+        UEXP_EDIT_ROW, UEXP_EDIT_FIELD, UEXP_EDIT_VALUE
     )
     
     # Ghi chi tiêu user
@@ -492,6 +518,10 @@ def main():
             ],
             UEXP_DESC: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_desc),
+            ],
+            UEXP_DATE: [
+                CallbackQueryHandler(uexp_date_select, pattern="^uexp_date_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_date_input),
             ],
         },
         fallbacks=[
@@ -517,6 +547,22 @@ def main():
         per_message=False,
     )
     application.add_handler(uexp_del_conv)
+    
+    # Sửa chi tiêu user
+    uexp_edit_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(uexp_edit_start, pattern="^uexp_edit$")],
+        states={
+            UEXP_EDIT_ROW: [MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_edit_select_row)],
+            UEXP_EDIT_FIELD: [CallbackQueryHandler(uexp_edit_select_field, pattern="^ueditf_")],
+            UEXP_EDIT_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, uexp_edit_save)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(uexp_cancel, pattern="^uexp_cancel$"),
+            CommandHandler("cancel", uexp_cancel),
+        ],
+        per_message=False,
+    )
+    application.add_handler(uexp_edit_conv)
     
     # Thống kê chi tiêu user (callbacks)
     application.add_handler(CallbackQueryHandler(uexp_today, pattern="^uexp_today$"))
