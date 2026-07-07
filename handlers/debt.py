@@ -278,10 +278,16 @@ async def ghino_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "📝 GHI NỢ MỚI\n\n"
         
         if customers:
+            # Batch: đọc tất cả nợ 1 lần
+            all_debts = sheets.get_all_debts(status='pending')
+            debt_totals = {}
+            for d in all_debts:
+                name = d['customer']
+                debt_totals[name] = debt_totals.get(name, 0) + d['amount']
+            
             text += "👤 Chọn khách hàng hoặc tạo mới:\n\n"
-            # Show summary of displayed customers
             for c in customers[:CUSTOMERS_PER_PAGE]:
-                debt = sheets.get_customer_total_debt(c['name'])
+                debt = debt_totals.get(c['name'], 0)
                 if debt > 0:
                     text += f"• {c['name']}: đang nợ {format_currency(debt)}\n"
                 else:
@@ -309,29 +315,43 @@ async def ghino_more_customers(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     
-    offset = int(query.data.replace("debt_more_", ""))
-    customers = sheets.get_all_saved_customers()
-    
-    text = "📝 GHI NỢ MỚI\n\n👤 Chọn khách hàng:\n\n"
-    
-    page = customers[offset:offset + CUSTOMERS_PER_PAGE]
-    for c in page:
-        debt = sheets.get_customer_total_debt(c['name'])
-        if debt > 0:
-            text += f"• {c['name']}: đang nợ {format_currency(debt)}\n"
-        else:
-            text += f"• {c['name']}\n"
-    
-    remaining = len(customers) - offset - CUSTOMERS_PER_PAGE
-    if remaining > 0:
-        text += f"\n... và {remaining} khách khác"
-    
-    keyboard = _build_customer_keyboard(customers, offset=offset)
-    
-    await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    try:
+        offset = int(query.data.replace("debt_more_", ""))
+        customers = sheets.get_all_saved_customers()
+        
+        # Batch: đọc tất cả nợ 1 lần thay vì gọi API per customer
+        all_debts = sheets.get_all_debts(status='pending')
+        debt_totals = {}
+        for d in all_debts:
+            name = d['customer']
+            debt_totals[name] = debt_totals.get(name, 0) + d['amount']
+        
+        text = "📝 GHI NỢ MỚI\n\n👤 Chọn khách hàng:\n\n"
+        
+        page = customers[offset:offset + CUSTOMERS_PER_PAGE]
+        for c in page:
+            debt = debt_totals.get(c['name'], 0)
+            if debt > 0:
+                text += f"• {c['name']}: đang nợ {format_currency(debt)}\n"
+            else:
+                text += f"• {c['name']}\n"
+        
+        remaining = len(customers) - offset - CUSTOMERS_PER_PAGE
+        if remaining > 0:
+            text += f"\n... và {remaining} khách khác"
+        
+        keyboard = _build_customer_keyboard(customers, offset=offset)
+        
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        logger.error(f"Lỗi xem thêm khách: {e}")
+        await query.edit_message_text(
+            f"❌ Lỗi tải danh sách: {e}\n\nThử lại sau.",
+            reply_markup=get_cancel_keyboard()
+        )
     
     return NO_CUSTOMER
 
