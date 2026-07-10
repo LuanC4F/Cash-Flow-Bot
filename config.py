@@ -33,6 +33,12 @@ if _raw_uid:
     except ValueError:
         pass
 
+# SePay + VietQR payment config
+SEPAY_API_TOKEN = os.getenv("SEPAY_API_TOKEN", "")
+VIETQR_BANK_ID = os.getenv("VIETQR_BANK_ID", "MB")
+VIETQR_ACCOUNT_NO = os.getenv("VIETQR_ACCOUNT_NO", "")
+VIETQR_ACCOUNT_NAME = os.getenv("VIETQR_ACCOUNT_NAME", "")
+
 # Timezone Vietnam (UTC+7)
 from datetime import timezone, timedelta
 VN_TIMEZONE = timezone(timedelta(hours=7))

@@ -655,17 +655,78 @@ def main():
     port = int(os.getenv('PORT', 10000))
     
     if webhook_url:
-        # ===== PRODUCTION: Webhook mode =====
+        # ===== PRODUCTION: Webhook mode with Starlette =====
+        # Dùng Starlette để xử lý cả Telegram webhook lẫn SePay webhook
+        import asyncio
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.routing import Route
+        from contextlib import asynccontextmanager
+        
         logger.info(f"🌐 Webhook mode: {webhook_url}")
         
-        application.run_webhook(
-            listen='0.0.0.0',
-            port=port,
-            url_path=config.BOT_TOKEN,
-            webhook_url=f"{webhook_url}/{config.BOT_TOKEN}",
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
+        @asynccontextmanager
+        async def lifespan(app):
+            """Manage bot lifecycle with Starlette."""
+            await application.initialize()
+            await application.start()
+            await application.bot.set_webhook(
+                url=f"{webhook_url}/{config.BOT_TOKEN}",
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+            )
+            logger.info("✅ Bot started + webhook set")
+            yield
+            await application.stop()
+            await application.shutdown()
+            logger.info("🛑 Bot stopped")
+        
+        async def telegram_webhook(request: Request):
+            """Handle Telegram updates."""
+            try:
+                data = await request.json()
+                update = Update.de_json(data, application.bot)
+                await application.update_queue.put(update)
+                return PlainTextResponse("OK")
+            except Exception as e:
+                logger.error(f"Telegram webhook error: {e}")
+                return PlainTextResponse("ERROR", status_code=500)
+        
+        async def sepay_webhook(request: Request):
+            """Handle SePay payment webhooks."""
+            try:
+                data = await request.json()
+                logger.info(f"SePay webhook received: {data}")
+                
+                from services.sepay_service import handle_webhook
+                result = handle_webhook(data)
+                
+                if result:
+                    from handlers.debt import handle_sepay_payment_success
+                    await handle_sepay_payment_success(application.bot, result)
+                    logger.info(f"SePay payment processed: {result['payment_code']}")
+                
+                return JSONResponse({"success": True})
+            except Exception as e:
+                logger.error(f"SePay webhook error: {e}")
+                return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        
+        async def health_check(request: Request):
+            return PlainTextResponse("OK")
+        
+        starlette_app = Starlette(
+            lifespan=lifespan,
+            routes=[
+                Route(f"/{config.BOT_TOKEN}", telegram_webhook, methods=["POST"]),
+                Route("/sepay-webhook", sepay_webhook, methods=["POST"]),
+                Route("/health", health_check, methods=["GET"]),
+                Route("/", health_check, methods=["GET"]),
+            ],
         )
+        
+        uvicorn.run(starlette_app, host="0.0.0.0", port=port)
     else:
         # ===== LOCAL: Polling mode =====
         logger.info("🔄 Polling mode (local development)")
@@ -678,3 +739,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

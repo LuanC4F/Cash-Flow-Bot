@@ -14,25 +14,23 @@ from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 logger = logging.getLogger(__name__)
 
 
-def _resolve_customer(callback_data: str, prefix: str, context, user_id=None, payos_desc: str = '') -> str:
+def _resolve_customer(callback_data: str, prefix: str, context, user_id=None) -> str:
     """
     Resolve customer name with multiple fallback layers.
-    Survives bot restarts (context.user_data is in-memory only).
     
     Priority:
-    1. callback_data (encoded in button: prefix_ordercode_customer)
+    1. callback_data (encoded in button: prefix_code_customer)
     2. context.user_data
     3. Telegram ID lookup from debt records
-    4. PayOS description parsing (format: 'Tra no - {customer}')
     """
-    # 1. Parse from callback_data: prefix_{order_code}_{customer}
+    # 1. Parse from callback_data: prefix_{payment_code}_{customer}
     stripped = callback_data.replace(prefix, '', 1)
     parts = stripped.split('_', 1)
     if len(parts) == 2 and parts[1]:
         return parts[1]
     
     # 2. context.user_data fallback
-    for key in ('cust_customer', 'payos_customer'):
+    for key in ('cust_customer', 'sepay_customer'):
         val = context.user_data.get(key, '')
         if val:
             return val
@@ -43,142 +41,77 @@ def _resolve_customer(callback_data: str, prefix: str, context, user_id=None, pa
         if name:
             return name
     
-    # 4. PayOS description parsing: "Tra no - Anh Hieu"
-    if payos_desc and ' - ' in payos_desc:
-        return payos_desc.split(' - ', 1)[1].strip()
-    
     return ''
 
 
-# ==================== AUTO-POLL THANH TOÁN ====================
-# Tự động kiểm tra PayOS mỗi 15 giây sau khi tạo QR.
-# Không cần bấm "Kiểm Tra" thủ công nữa.
+# ==================== SEPAY WEBHOOK CALLBACK ====================
+# Khi SePay gửi webhook (tiền vào) → bot.py gọi hàm này để xử lý thanh toán nợ.
 
-POLL_INTERVAL = 15   # seconds
-POLL_TIMEOUT = 120   # max iterations (15s × 120 = 30 phút)
-
-
-def _start_payment_poll(context, order_code: int, customer: str, 
-                        chat_id: int, qr_message_id: int = None,
-                        is_customer: bool = False):
-    """Bắt đầu auto-poll PayOS sau khi tạo QR thanh toán."""
-    job_name = f"payment_poll_{order_code}"
+async def handle_sepay_payment_success(bot, payment_info: dict):
+    """Xử lý khi SePay webhook xác nhận thanh toán thành công.
     
-    # Cancel any existing poll for this order
-    _cancel_payment_poll(context, order_code)
-    
-    context.job_queue.run_repeating(
-        callback=_poll_payment_callback,
-        interval=POLL_INTERVAL,
-        first=POLL_INTERVAL,
-        data={
-            'order_code': order_code,
-            'customer': customer,
-            'chat_id': chat_id,
-            'qr_message_id': qr_message_id,
-            'is_customer': is_customer,
-            'poll_count': 0,
-        },
-        name=job_name,
-    )
-    logger.info(f"Started payment poll: {job_name} for {customer}")
-
-
-def _cancel_payment_poll(context, order_code: int):
-    """Hủy background poll cho 1 đơn hàng."""
-    job_name = f"payment_poll_{order_code}"
-    jobs = context.job_queue.get_jobs_by_name(job_name)
-    for job in jobs:
-        job.schedule_removal()
-    if jobs:
-        logger.info(f"Cancelled payment poll: {job_name}")
-
-
-async def _poll_payment_callback(context):
-    """Background job: kiểm tra PayOS status tự động."""
-    job = context.job
-    data = job.data
-    
-    # Timeout check
-    data['poll_count'] = data.get('poll_count', 0) + 1
-    if data['poll_count'] > POLL_TIMEOUT:
-        logger.info(f"Payment poll timeout: order {data['order_code']}")
-        job.schedule_removal()
-        return
-    
-    order_code = data['order_code']
-    customer = data['customer']
-    
-    try:
-        from services.payos_service import check_payment_status
-        result = check_payment_status(order_code)
-        
-        if result['status'] == 'PAID':
-            # Kiểm tra nợ còn pending không (tránh xử lý trùng nếu đã bấm nút)
-            remaining = sheets.get_customer_total_debt(customer)
-            if remaining <= 0:
-                job.schedule_removal()
-                return
-            
-            await _handle_auto_paid(context, data, result)
-            job.schedule_removal()
-            
-        elif result['status'] in ('CANCELLED', 'EXPIRED'):
-            logger.info(f"Payment {result['status']}: order {order_code}")
-            job.schedule_removal()
-            
-    except Exception as e:
-        logger.error(f"Payment poll error (order {order_code}): {e}")
-
-
-async def _handle_auto_paid(context, job_data: dict, payos_result: dict):
-    """Xử lý khi auto-poll phát hiện thanh toán thành công."""
-    order_code = job_data['order_code']
-    customer = job_data['customer']
-    chat_id = job_data['chat_id']
-    qr_message_id = job_data.get('qr_message_id')
-    is_customer = job_data.get('is_customer', False)
-    amount = payos_result['amount']
+    Called from bot.py webhook route.
+    """
+    payment_code = payment_info['payment_code']
+    customer = payment_info['customer']
+    amount = payment_info['amount']
+    chat_id = payment_info.get('chat_id')
+    qr_message_id = payment_info.get('qr_message_id')
+    is_customer = payment_info.get('is_customer', False)
     
     # Đánh dấu nợ đã trả
     count = sheets.mark_customer_debts_paid(customer)
     if count == 0:
+        logger.info(f"SePay paid but no pending debts for {customer}")
         return
     
-    logger.info(f"Auto-paid: {customer}, {format_currency(amount)}, {count} debts")
+    logger.info(f"SePay PAID: {customer}, {format_currency(amount)}, {count} debts")
     
     # Xóa QR message cũ
-    if qr_message_id:
+    if qr_message_id and chat_id:
         try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=qr_message_id)
+            await bot.delete_message(chat_id=chat_id, message_id=qr_message_id)
         except Exception:
             pass
     
-    # Gửi thông báo thành công vào chat chứa QR
-    if is_customer:
-        # Customer chat: thông báo ngắn gọn
-        text = f"✅ THANH TOÁN THÀNH CÔNG!\n\n"
-        text += f"👤 {customer}\n"
-        text += f"💰 {format_currency(amount)}\n\n"
-        text += f"🎉 Đã thanh toán {count} khoản nợ.\nCảm ơn bạn! 🙏"
-        await context.bot.send_message(chat_id=chat_id, text=text)
-    else:
-        # Admin chat: thông báo chi tiết + keyboard
-        text = f"✅ ĐÃ THANH TOÁN! (tự động phát hiện)\n\n"
-        text += f"👤 Khách: {customer}\n"
-        text += f"💰 Số tiền: {format_currency(amount)}\n"
-        text += f"📋 Mã đơn: {order_code}\n\n"
-        text += f"🎉 Đã đánh dấu {count} khoản nợ đã trả!"
-        await context.bot.send_message(
-            chat_id=chat_id, text=text, reply_markup=get_debt_keyboard()
-        )
+    # Gửi thông báo vào chat chứa QR
+    if chat_id:
+        if is_customer:
+            text = f"✅ THANH TOÁN THÀNH CÔNG!\n\n"
+            text += f"👤 {customer}\n"
+            text += f"💰 {format_currency(amount)}\n\n"
+            text += f"🎉 Đã thanh toán {count} khoản nợ.\nCảm ơn bạn! 🙏"
+            await bot.send_message(chat_id=chat_id, text=text)
+        else:
+            text = f"✅ ĐÃ THANH TOÁN! (SePay tự động)\n\n"
+            text += f"👤 Khách: {customer}\n"
+            text += f"💰 Số tiền: {format_currency(amount)}\n"
+            text += f"📝 Mã CK: {payment_code}\n\n"
+            text += f"🎉 Đã đánh dấu {count} khoản nợ đã trả!"
+            await bot.send_message(
+                chat_id=chat_id, text=text, reply_markup=get_debt_keyboard()
+            )
     
-    # Thông báo admin (chỉ khi QR từ customer — admin đã thấy ở chat của mình rồi)
-    if is_customer:
-        await _notify_admin_debt_paid(
-            context, customer, amount, order_code, count,
-            source='auto_detect'
-        )
+    # Thông báo admin (nếu QR từ customer)
+    if is_customer and config.ALLOWED_USER_ID:
+        admin_text = f"🔔 *KHÁCH ĐÃ THANH TOÁN!*\n\n"
+        admin_text += f"👤 Khách: {customer}\n"
+        admin_text += f"💰 Số tiền: {format_currency(amount)}\n"
+        admin_text += f"📝 Mã CK: {payment_code}\n"
+        admin_text += f"📊 Đã xóa {count} khoản nợ\n"
+        admin_text += f"📡 Nguồn: SePay Webhook"
+        try:
+            await bot.send_message(
+                chat_id=config.ALLOWED_USER_ID,
+                text=admin_text,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin: {e}")
+
+
+
+
 
 
 # Conversation states
@@ -706,19 +639,18 @@ async def debt_customer_detail(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_back_keyboard())
 
 
-# ==================== PAYOS THANH TOÁN ====================
+# ==================== SEPAY THANH TOÁN ====================
 
 async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tạo QR thanh toán PayOS cho khách"""
+    """Tạo QR thanh toán SePay + VietQR cho khách"""
     query = update.callback_query
     await query.answer()
     
     customer = query.data.replace("debt_paylink_", "")
     
     try:
-        from services.payos_service import create_payment_link
+        from services.sepay_service import create_payment, update_payment_meta
         
-        # Lấy tổng nợ
         total = sheets.get_customer_total_debt(customer)
         
         if total <= 0:
@@ -728,193 +660,123 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
         
-        # Thông báo đang tạo
         await query.edit_message_text("⏳ Đang tạo QR thanh toán...")
         
-        # Tạo link PayOS
-        result = create_payment_link(customer, total, f"Tra no - {customer}")
+        result = create_payment(customer, int(total))
+        payment_code = result['payment_code']
         
-        # Lưu order_code để kiểm tra sau
-        context.user_data['payos_order'] = result['order_code']
-        context.user_data['payos_customer'] = customer
+        context.user_data['sepay_payment'] = payment_code
+        context.user_data['sepay_customer'] = customer
         
-        caption = f"🧾 ĐƠN HÀNG: {result['order_code']}\n"
+        caption = f"🧾 THANH TOÁN CÔNG NỢ\n\n"
         caption += f"👤 {customer}\n"
-        caption += f"💰 {format_currency(total)}"
+        caption += f"💰 {format_currency(total)}\n\n"
+        caption += f"🏦 Ngân hàng: {result['bank_id']}\n"
+        caption += f"💳 STK: {result['account_no']}\n"
+        caption += f"👤 Chủ TK: {result['account_name']}\n"
+        caption += f"📝 Nội dung CK: {payment_code}\n\n"
+        caption += f"⚠️ GHI ĐÚNG nội dung CK!"
         
         keyboard = [
-            [InlineKeyboardButton("🏦 APP NGÂN HÀNG", url=result['checkout_url'])],
-            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"debt_checkpay_{result['order_code']}_{customer[:15]}")],
+            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"debt_checkpay_{payment_code}_{customer[:15]}")],
             [InlineKeyboardButton("❌ Hủy đơn", callback_data=f"debt_cancelqr_{customer[:15]}")],
         ]
         
-        # Gửi ảnh QR code
-        qr_url = result.get('qr_code', '')
-        checkout_url = result.get('checkout_url', '')
+        qr_url = result['qr_url']
         chat_id = query.message.chat_id
-        
         qr_msg = None
         sent = False
         
-        if qr_url:
-            # Cách 1: Gửi URL trực tiếp cho Telegram tải
+        try:
+            qr_msg = await context.bot.send_photo(
+                chat_id=chat_id, photo=qr_url, caption=caption,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            sent = True
+        except Exception:
+            pass
+        
+        if not sent:
             try:
+                import urllib.request, io
+                req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    qr_bytes = io.BytesIO(resp.read())
+                    qr_bytes.name = 'qr_payment.jpg'
                 qr_msg = await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=qr_url,
-                    caption=caption,
+                    chat_id=chat_id, photo=qr_bytes, caption=caption,
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 sent = True
             except Exception:
                 pass
-            
-            # Cách 2: Tự tải về bytes rồi gửi
-            if not sent:
-                try:
-                    import urllib.request
-                    import io
-                    
-                    req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=15) as resp:
-                        qr_bytes = io.BytesIO(resp.read())
-                        qr_bytes.name = 'qr_payment.png'
-                    
-                    qr_msg = await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=qr_bytes,
-                        caption=caption,
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
-                    sent = True
-                except Exception:
-                    pass
         
         if not sent:
-            # Cách 3: Gửi link text
-            caption += f"\n\n🔗 Link: {checkout_url}"
             qr_msg = await context.bot.send_message(
-                chat_id=chat_id,
-                text=caption,
+                chat_id=chat_id, text=caption,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         
-        # Lưu QR message ID để xóa sau khi thanh toán/hủy
         if qr_msg:
             context.user_data['qr_message_id'] = qr_msg.message_id
             context.user_data['qr_chat_id'] = chat_id
+            update_payment_meta(payment_code, chat_id=chat_id, 
+                              qr_message_id=qr_msg.message_id, is_customer=False)
         
-        # Xóa message "⏳ Đang tạo QR..." cho gọn
         try:
             await query.message.delete()
         except Exception:
             pass
-        
-        # 🔄 Auto-poll: tự động phát hiện thanh toán
-        _start_payment_poll(
-            context,
-            order_code=result['order_code'],
-            customer=customer,
-            chat_id=chat_id,
-            qr_message_id=qr_msg.message_id if qr_msg else None,
-            is_customer=False,
-        )
     
     except Exception as e:
         await query.edit_message_text(f"❌ Lỗi tạo QR: {str(e)}", reply_markup=get_back_keyboard())
 
 
 async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kiểm tra trạng thái thanh toán PayOS"""
+    """Kiểm tra trạng thái thanh toán SePay"""
     query = update.callback_query
     
     raw_data = query.data.replace("debt_checkpay_", "")
-    # Parse order_code (first part before _)
-    order_code_str = raw_data.split('_', 1)[0]
+    payment_code = raw_data.split('_', 1)[0]
     
     try:
-        from services.payos_service import check_payment_status
+        from services.sepay_service import check_payment_status
         
-        order_code = int(order_code_str)
-        result = check_payment_status(order_code)
-        
-        customer = _resolve_customer(
-            query.data, 'debt_checkpay_', context,
-            payos_desc=result.get('description', '')
-        )
+        result = check_payment_status(payment_code)
+        customer = _resolve_customer(query.data, 'debt_checkpay_', context)
         chat_id = query.message.chat_id
         
         if result['status'] == 'PAID':
-            # Hủy auto-poll nếu đang chạy
-            _cancel_payment_poll(context, order_code)
-            
-            # ✅ Thanh toán thành công → xóa QR + cập nhật sheet
             try:
                 await query.message.delete()
             except Exception:
                 pass
             
-            # Tự động đánh dấu tất cả nợ đã trả trong sheet
             count = sheets.mark_customer_debts_paid(customer)
             
-            text = f"""✅ ĐÃ THANH TOÁN THÀNH CÔNG!
-
-👤 Khách: {customer}
-💰 Số tiền: {format_currency(result['amount'])}
-📋 Mã đơn: {order_code}
-
-🎉 Đã tự động đánh dấu {count} khoản nợ đã trả!"""
+            text = f"✅ ĐÃ THANH TOÁN THÀNH CÔNG!\n\n"
+            text += f"👤 Khách: {customer}\n"
+            text += f"💰 Số tiền: {format_currency(result['amount'])}\n"
+            text += f"📝 Mã CK: {payment_code}\n\n"
+            text += f"🎉 Đã tự động đánh dấu {count} khoản nợ đã trả!"
             
-            # Dọn dẹp user_data
-            context.user_data.pop('payos_order', None)
-            context.user_data.pop('payos_customer', None)
+            context.user_data.pop('sepay_payment', None)
+            context.user_data.pop('sepay_customer', None)
             context.user_data.pop('qr_message_id', None)
             context.user_data.pop('qr_chat_id', None)
             
             await context.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=get_debt_keyboard()
+                chat_id=chat_id, text=text, reply_markup=get_debt_keyboard()
             )
             
-            # 🔔 Thông báo admin: khách đã thanh toán (qua admin check)
             await _notify_admin_debt_paid(
-                context, customer, result['amount'], order_code, count,
+                context, customer, result['amount'], payment_code, count,
                 source='admin_check'
             )
         
-        elif result['status'] == 'CANCELLED':
-            _cancel_payment_poll(context, order_code)
-            
-            # ❌ Đã hủy → xóa QR
-            try:
-                await query.message.delete()
-            except Exception:
-                pass
-            
-            text = f"❌ Thanh toán đã bị HỦY!\n\nMã đơn: {order_code}"
-            
-            keyboard = [
-                [InlineKeyboardButton("💳 Tạo Link Mới", callback_data=f"debt_paylink_{customer[:15]}")],
-                [InlineKeyboardButton("🔙 Quản Lý Nợ", callback_data="menu_no")]
-            ]
-            
-            # Dọn dẹp user_data
-            context.user_data.pop('payos_order', None)
-            context.user_data.pop('payos_customer', None)
-            context.user_data.pop('qr_message_id', None)
-            context.user_data.pop('qr_chat_id', None)
-            
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        
         else:
-            # ⏳ PENDING → hiện popup, giữ QR để khách quét
             await query.answer(
-                "⏳ Chưa thanh toán.\nGửi link cho khách và bấm Kiểm Tra lại sau.",
+                "⏳ Chưa nhận được thanh toán.\nKhách cần CK đúng nội dung và số tiền.",
                 show_alert=True
             )
     
@@ -923,27 +785,25 @@ async def debt_check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def debt_cancel_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Hủy đơn QR thanh toán - xóa message QR"""
+    """Hủy đơn QR thanh toán"""
     query = update.callback_query
     await query.answer()
     
     customer = query.data.replace("debt_cancelqr_", "")
     chat_id = query.message.chat_id
     
-    # Xóa message QR
     try:
         await query.message.delete()
     except Exception:
         pass
     
-    # Hủy auto-poll
-    order_code = context.user_data.get('payos_order')
-    if order_code:
-        _cancel_payment_poll(context, order_code)
+    payment_code = context.user_data.get('sepay_payment')
+    if payment_code:
+        from services.sepay_service import cancel_payment
+        cancel_payment(payment_code)
     
-    # Dọn dẹp user_data
-    context.user_data.pop('payos_order', None)
-    context.user_data.pop('payos_customer', None)
+    context.user_data.pop('sepay_payment', None)
+    context.user_data.pop('sepay_customer', None)
     context.user_data.pop('qr_message_id', None)
     context.user_data.pop('qr_chat_id', None)
     
@@ -952,6 +812,7 @@ async def debt_cancel_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"❌ Đã hủy đơn thanh toán của {customer}.",
         reply_markup=get_debt_keyboard()
     )
+
 
 
 # ==================== TRẢ NỢ ====================
@@ -1292,7 +1153,7 @@ async def debt_set_tid_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
 # để khách nợ có thể tự thanh toán qua QR
 
 async def cust_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Khách bấm nút Thanh Toán → tạo QR PayOS"""
+    """Khách bấm nút Thanh Toán → tạo QR SePay + VietQR"""
     query = update.callback_query
     await query.answer()
     
@@ -1300,7 +1161,7 @@ async def cust_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat_id
     
     try:
-        from services.payos_service import create_payment_link
+        from services.sepay_service import create_payment, update_payment_meta
         
         total = sheets.get_customer_total_debt(customer)
         
@@ -1312,84 +1173,69 @@ async def cust_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text("⏳ Đang tạo mã thanh toán...")
         
-        result = create_payment_link(customer, total, f"Tra no - {customer}")
+        result = create_payment(customer, int(total))
+        payment_code = result['payment_code']
         
-        # Lưu thông tin để kiểm tra sau
-        context.user_data['cust_order'] = result['order_code']
+        context.user_data['cust_payment'] = payment_code
         context.user_data['cust_customer'] = customer
         
         caption = f"🧾 THANH TOÁN CÔNG NỢ\n\n"
         caption += f"👤 {customer}\n"
         caption += f"💰 {format_currency(total)}\n\n"
-        caption += f"📱 Quét mã QR hoặc bấm nút bên dưới để thanh toán"
+        caption += f"🏦 Ngân hàng: {result['bank_id']}\n"
+        caption += f"💳 STK: {result['account_no']}\n"
+        caption += f"👤 Chủ TK: {result['account_name']}\n"
+        caption += f"📝 Nội dung CK: {payment_code}\n\n"
+        caption += f"📱 Quét mã QR hoặc CK thủ công\n"
+        caption += f"⚠️ GHI ĐÚNG nội dung CK!"
         
         keyboard = [
-            [InlineKeyboardButton("🏦 MỞ APP NGÂN HÀNG", url=result['checkout_url'])],
-            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"custcheck_{result['order_code']}_{customer[:15]}")],
+            [InlineKeyboardButton("🔄 Kiểm Tra Thanh Toán", callback_data=f"custcheck_{payment_code}_{customer[:15]}")],
             [InlineKeyboardButton("❌ Hủy", callback_data=f"custcancel_{customer[:15]}")],
         ]
         
-        qr_url = result.get('qr_code', '')
-        checkout_url = result.get('checkout_url', '')
-        
+        qr_url = result['qr_url']
         qr_msg = None
         sent = False
         
-        if qr_url:
+        try:
+            qr_msg = await context.bot.send_photo(
+                chat_id=chat_id, photo=qr_url, caption=caption,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            sent = True
+        except Exception:
+            pass
+        
+        if not sent:
             try:
+                import urllib.request, io
+                req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    qr_bytes = io.BytesIO(resp.read())
+                    qr_bytes.name = 'qr_payment.jpg'
                 qr_msg = await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=qr_url,
-                    caption=caption,
+                    chat_id=chat_id, photo=qr_bytes, caption=caption,
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 sent = True
             except Exception:
                 pass
-            
-            if not sent:
-                try:
-                    import urllib.request
-                    import io
-                    
-                    req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=15) as resp:
-                        qr_bytes = io.BytesIO(resp.read())
-                        qr_bytes.name = 'qr_payment.png'
-                    
-                    qr_msg = await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=qr_bytes,
-                        caption=caption,
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
-                    sent = True
-                except Exception:
-                    pass
         
         if not sent:
-            caption += f"\n\n🔗 Link: {checkout_url}"
             qr_msg = await context.bot.send_message(
-                chat_id=chat_id,
-                text=caption,
+                chat_id=chat_id, text=caption,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         
-        # Xóa message "Đang tạo..."
+        if qr_msg:
+            update_payment_meta(payment_code, chat_id=chat_id,
+                              qr_message_id=qr_msg.message_id, is_customer=True)
+        
         try:
             await query.message.delete()
         except Exception:
             pass
-        
-        # 🔄 Auto-poll: tự động phát hiện thanh toán
-        _start_payment_poll(
-            context,
-            order_code=result['order_code'],
-            customer=customer,
-            chat_id=chat_id,
-            qr_message_id=qr_msg.message_id if qr_msg else None,
-            is_customer=True,
-        )
     
     except Exception as e:
         await query.edit_message_text(
@@ -1398,37 +1244,28 @@ async def cust_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cust_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Khách kiểm tra trạng thái thanh toán"""
+    """Khách kiểm tra trạng thái thanh toán SePay"""
     query = update.callback_query
     
     raw_data = query.data.replace("custcheck_", "")
-    # Parse order_code (first part before _)
-    order_code_str = raw_data.split('_', 1)[0]
+    payment_code = raw_data.split('_', 1)[0]
     
     try:
-        from services.payos_service import check_payment_status
+        from services.sepay_service import check_payment_status
         
-        order_code = int(order_code_str)
-        result = check_payment_status(order_code)
-        
+        result = check_payment_status(payment_code)
         customer = _resolve_customer(
             query.data, 'custcheck_', context,
-            user_id=query.from_user.id,
-            payos_desc=result.get('description', '')
+            user_id=query.from_user.id
         )
         chat_id = query.message.chat_id
         
         if result['status'] == 'PAID':
-            # Hủy auto-poll nếu đang chạy
-            _cancel_payment_poll(context, order_code)
-            
-            # Xóa QR
             try:
                 await query.message.delete()
             except Exception:
                 pass
             
-            # Cập nhật sheet
             count = sheets.mark_customer_debts_paid(customer)
             
             text = f"✅ THANH TOÁN THÀNH CÔNG!\n\n"
@@ -1439,41 +1276,17 @@ async def cust_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await context.bot.send_message(chat_id=chat_id, text=text)
             
-            # 🔔 Thông báo admin: khách tự thanh toán thành công
             await _notify_admin_debt_paid(
-                context, customer, result['amount'], order_code, count,
+                context, customer, result['amount'], payment_code, count,
                 source='customer_self_pay'
             )
             
-            # Dọn dẹp
-            context.user_data.pop('cust_order', None)
-            context.user_data.pop('cust_customer', None)
-        
-        elif result['status'] == 'CANCELLED':
-            _cancel_payment_poll(context, order_code)
-            
-            try:
-                await query.message.delete()
-            except Exception:
-                pass
-            
-            text = f"❌ Thanh toán đã bị hủy.\n\nBấm nút bên dưới để thử lại."
-            
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"💳 Thanh Toán Lại", callback_data=f"custpay_{customer[:15]}")]
-                ])
-            )
-            
-            context.user_data.pop('cust_order', None)
+            context.user_data.pop('cust_payment', None)
             context.user_data.pop('cust_customer', None)
         
         else:
-            # PENDING → popup, giữ QR
             await query.answer(
-                "⏳ Chưa nhận được thanh toán.\nVui lòng thanh toán và kiểm tra lại.",
+                "⏳ Chưa nhận được thanh toán.\nVui lòng CK đúng nội dung và kiểm tra lại.",
                 show_alert=True
             )
     
@@ -1494,18 +1307,23 @@ async def cust_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
     
-    # Hủy auto-poll
-    order_code = context.user_data.get('cust_order')
-    if order_code:
-        _cancel_payment_poll(context, order_code)
+    payment_code = context.user_data.get('cust_payment')
+    if payment_code:
+        from services.sepay_service import cancel_payment
+        cancel_payment(payment_code)
     
     await context.bot.send_message(
         chat_id=chat_id,
         text=f"❌ Đã hủy thanh toán.\n\nNếu muốn thanh toán sau, vui lòng liên hệ chủ shop.",
     )
     
-    context.user_data.pop('cust_order', None)
+    context.user_data.pop('cust_payment', None)
     context.user_data.pop('cust_customer', None)
+
+
+
+        
+
 
 
 async def cust_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1550,7 +1368,7 @@ async def cust_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== THÔNG BÁO ADMIN ====================
 
 async def _notify_admin_debt_paid(context, customer: str, amount: float, 
-                                   order_code: int, debt_count: int,
+                                   payment_code: str, debt_count: int,
                                    source: str = 'unknown'):
     """Gửi thông báo cho admin khi khách thanh toán nợ thành công"""
     if not config.ALLOWED_USER_ID:
@@ -1573,7 +1391,7 @@ async def _notify_admin_debt_paid(context, customer: str, amount: float,
         text = f"💰 *KHÁCH ĐÃ THANH TOÁN NỢ!*\n\n"
         text += f"👤 Khách: {customer}\n"
         text += f"💵 Số tiền: {format_currency(amount)}\n"
-        text += f"📋 Mã đơn: `{order_code}`\n"
+        text += f"📋 Mã CK: `{payment_code}`\n"
         text += f"✅ Số khoản nợ đã xóa: {debt_count}\n"
         text += f"📡 Nguồn: {source_label}\n"
         
