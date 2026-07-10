@@ -97,15 +97,64 @@ def update_payment_meta(payment_code: str, chat_id: int = None,
 # ==================== CHECK STATUS ====================
 
 def check_payment_status(payment_code: str) -> dict:
-    """Tra in-memory dict xem payment đã được webhook confirm chưa.
+    """Kiểm tra thanh toán: gọi API SePay lấy giao dịch gần nhất, so khớp nội dung CK.
     
-    Returns: {status, customer, amount} or None
+    Fallback: nếu in-memory đã PAID (do webhook) thì trả luôn.
     """
+    # 1. Check in-memory trước (nhanh, webhook đã xác nhận)
     payment = _pending_payments.get(payment_code)
     if not payment:
         return {'status': 'NOT_FOUND'}
+    
+    if payment['status'] == 'paid':
+        return {
+            'status': 'PAID',
+            'customer': payment['customer'],
+            'amount': payment.get('paid_amount', payment['amount']),
+        }
+    
+    # 2. Gọi API SePay kiểm tra giao dịch thật
+    try:
+        import requests
+        headers = {
+            'Authorization': f'Bearer {SEPAY_API_TOKEN}',
+            'Content-Type': 'application/json',
+        }
+        resp = requests.get(
+            'https://my.sepay.vn/userapi/transactions/list',
+            headers=headers,
+            params={
+                'limit': 10,
+                'account_number': VIETQR_ACCOUNT_NO,
+            },
+            timeout=10,
+        )
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            transactions = data.get('transactions', [])
+            
+            for txn in transactions:
+                content = (txn.get('transaction_content') or '').upper()
+                if payment_code.upper() in content and txn.get('amount_in', 0) > 0:
+                    # Tìm thấy giao dịch khớp!
+                    amount = int(txn['amount_in'])
+                    payment['status'] = 'paid'
+                    payment['paid_amount'] = amount
+                    logger.info(f"API check: PAID! {payment_code}, amount={amount}")
+                    return {
+                        'status': 'PAID',
+                        'customer': payment['customer'],
+                        'amount': amount,
+                    }
+        else:
+            logger.warning(f"SePay API error: {resp.status_code} - {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"SePay API check failed: {e}")
+    
+    # 3. Chưa tìm thấy → PENDING
     return {
-        'status': payment['status'].upper(),
+        'status': 'PENDING',
         'customer': payment['customer'],
         'amount': payment['amount'],
     }

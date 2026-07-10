@@ -700,10 +700,12 @@ def main():
                 data = await request.json()
                 logger.info(f"SePay webhook received: {data}")
                 
-                from services.sepay_service import handle_webhook
-                result = handle_webhook(data)
+                auth_header = request.headers.get('Authorization', '')
                 
-                if result:
+                from services.sepay_service import handle_sepay_webhook
+                result = handle_sepay_webhook(data, auth_header)
+                
+                if result.get('matched'):
                     from handlers.debt import handle_sepay_payment_success
                     await handle_sepay_payment_success(application.bot, result)
                     logger.info(f"SePay payment processed: {result['payment_code']}")
