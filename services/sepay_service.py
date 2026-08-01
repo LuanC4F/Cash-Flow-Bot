@@ -50,7 +50,7 @@ def generate_vietqr_url(amount: int, content: str) -> str:
 # ==================== CREATE PAYMENT ====================
 
 def create_payment(customer: str, amount: int) -> dict:
-    """Tạo payment mới: sinh code + QR URL + lưu pending.
+    """Tạo payment mới: sinh code + QR URL + lưu pending (RAM + Sheets).
     
     Returns: {payment_code, qr_url, amount, bank_info}
     """
@@ -60,7 +60,7 @@ def create_payment(customer: str, amount: int) -> dict:
     payment_code = _generate_payment_code()
     qr_url = generate_vietqr_url(amount, payment_code)
     
-    # Lưu vào pending
+    # Lưu vào RAM (cache nhanh)
     _pending_payments[payment_code] = {
         'customer': customer,
         'amount': amount,
@@ -70,6 +70,13 @@ def create_payment(customer: str, amount: int) -> dict:
         'qr_message_id': None,
         'is_customer': False,
     }
+    
+    # Lưu vào Sheets (persistent, sống sót qua restart)
+    try:
+        from services import sheets
+        sheets.save_payment(payment_code, customer, amount)
+    except Exception as e:
+        logger.error(f"Failed to save payment to Sheets: {e}")
     
     logger.info(f"Created payment: {payment_code} for {customer}, {amount} VND")
     
@@ -92,28 +99,49 @@ def update_payment_meta(payment_code: str, chat_id: int = None,
         if qr_message_id is not None:
             _pending_payments[payment_code]['qr_message_id'] = qr_message_id
         _pending_payments[payment_code]['is_customer'] = is_customer
+    
+    # Cập nhật Sheets
+    try:
+        from services import sheets
+        sheets.update_payment_meta_sheet(payment_code, chat_id, qr_message_id, is_customer)
+    except Exception as e:
+        logger.error(f"Failed to update payment meta in Sheets: {e}")
 
 
 # ==================== CHECK STATUS ====================
 
 def check_payment_status(payment_code: str) -> dict:
-    """Kiểm tra thanh toán: gọi API SePay lấy giao dịch gần nhất, so khớp nội dung CK.
-    
-    Fallback: nếu in-memory đã PAID (do webhook) thì trả luôn.
-    """
-    # 1. Check in-memory trước (nhanh, webhook đã xác nhận)
+    """Kiểm tra thanh toán: RAM → Sheets → API SePay."""
+    # 1. Check in-memory (nhanh)
     payment = _pending_payments.get(payment_code)
-    if not payment:
-        return {'status': 'NOT_FOUND'}
     
-    if payment['status'] == 'paid':
+    # 2. Fallback: tìm trong Sheets nếu không có trong RAM
+    if not payment:
+        try:
+            from services import sheets
+            sheet_payment = sheets.get_payment(payment_code)
+            if sheet_payment and sheet_payment['status'] == 'paid':
+                return {
+                    'status': 'PAID',
+                    'customer': sheet_payment['customer'],
+                    'amount': sheet_payment['amount'],
+                }
+            elif sheet_payment:
+                payment = sheet_payment
+            else:
+                return {'status': 'NOT_FOUND'}
+        except Exception as e:
+            logger.error(f"Sheets lookup failed: {e}")
+            return {'status': 'NOT_FOUND'}
+    
+    if payment.get('status') == 'paid':
         return {
             'status': 'PAID',
             'customer': payment['customer'],
             'amount': payment.get('paid_amount', payment['amount']),
         }
     
-    # 2. Gọi API SePay kiểm tra giao dịch thật
+    # 3. Gọi API SePay kiểm tra giao dịch thật
     try:
         import requests
         headers = {
@@ -137,10 +165,17 @@ def check_payment_status(payment_code: str) -> dict:
             for txn in transactions:
                 content = (txn.get('transaction_content') or '').upper()
                 if payment_code.upper() in content and txn.get('amount_in', 0) > 0:
-                    # Tìm thấy giao dịch khớp!
                     amount = int(txn['amount_in'])
-                    payment['status'] = 'paid'
-                    payment['paid_amount'] = amount
+                    # Cập nhật RAM
+                    if payment_code in _pending_payments:
+                        _pending_payments[payment_code]['status'] = 'paid'
+                        _pending_payments[payment_code]['paid_amount'] = amount
+                    # Cập nhật Sheets
+                    try:
+                        from services import sheets
+                        sheets.mark_payment_paid(payment_code)
+                    except Exception:
+                        pass
                     logger.info(f"API check: PAID! {payment_code}, amount={amount}")
                     return {
                         'status': 'PAID',
@@ -152,7 +187,7 @@ def check_payment_status(payment_code: str) -> dict:
     except Exception as e:
         logger.error(f"SePay API check failed: {e}")
     
-    # 3. Chưa tìm thấy → PENDING
+    # 4. Chưa tìm thấy → PENDING
     return {
         'status': 'PENDING',
         'customer': payment['customer'],
@@ -204,11 +239,24 @@ def handle_sepay_webhook(data: dict, auth_header: str) -> dict:
     
     payment_code = f"{PAYMENT_CODE_PREFIX}{match.group(1)}"
     
-    # 4. Tìm payment pending
+    # 4. Tìm payment pending (RAM → Sheets fallback)
     payment = _pending_payments.get(payment_code)
+    from_sheets = False
     if not payment:
-        logger.warning(f"SePay webhook: payment not found: {payment_code}")
-        return {'matched': False, 'reason': 'not_found', 'payment_code': payment_code}
+        # Fallback: tìm trong Sheets (server có thể đã restart)
+        try:
+            from services import sheets
+            sheet_payment = sheets.get_payment(payment_code)
+            if sheet_payment and sheet_payment['status'] == 'pending':
+                payment = sheet_payment
+                from_sheets = True
+                logger.info(f"SePay webhook: found payment in Sheets: {payment_code}")
+        except Exception as e:
+            logger.error(f"Sheets fallback failed: {e}")
+        
+        if not payment:
+            logger.warning(f"SePay webhook: payment not found: {payment_code}")
+            return {'matched': False, 'reason': 'not_found', 'payment_code': payment_code}
     
     # Idempotency
     if payment['status'] == 'paid':
@@ -230,16 +278,26 @@ def handle_sepay_webhook(data: dict, auth_header: str) -> dict:
     payment['status'] = 'paid'
     payment['paid_amount'] = transfer_amount
     
+    # Cập nhật Sheets
+    try:
+        from services import sheets
+        sheets.mark_payment_paid(payment_code)
+    except Exception as e:
+        logger.error(f"Failed to mark payment paid in Sheets: {e}")
+    
     logger.info(f"SePay webhook: PAID! {payment_code}, {payment['customer']}, {transfer_amount}")
+    
+    chat_id = payment.get('chat_id') or ''
+    qr_message_id = payment.get('qr_message_id') or ''
     
     return {
         'matched': True,
         'payment_code': payment_code,
         'customer': payment['customer'],
         'amount': transfer_amount,
-        'chat_id': payment['chat_id'],
-        'qr_message_id': payment['qr_message_id'],
-        'is_customer': payment['is_customer'],
+        'chat_id': int(chat_id) if chat_id else None,
+        'qr_message_id': int(qr_message_id) if qr_message_id else None,
+        'is_customer': payment.get('is_customer', False),
     }
 
 

@@ -1200,3 +1200,107 @@ def delete_user_expense(telegram_id: str, row_num: int) -> bool:
         return True
     except Exception:
         return False
+
+
+# ==================== PAYMENTS (SePay persistence) ====================
+
+PAYMENTS_SHEET = "Payments"
+PAYMENTS_HEADERS = ["PaymentCode", "Customer", "Amount", "Status", "ChatID", "QrMessageID", "IsCustomer", "CreatedAt"]
+
+
+def _get_payments_sheet():
+    """Get or create Payments sheet."""
+    sp = get_client()
+    try:
+        return sp.worksheet(PAYMENTS_SHEET)
+    except gspread.WorksheetNotFound:
+        sheet = sp.add_worksheet(title=PAYMENTS_SHEET, rows=100, cols=len(PAYMENTS_HEADERS))
+        sheet.append_row(PAYMENTS_HEADERS)
+        return sheet
+
+
+def save_payment(payment_code: str, customer: str, amount: int,
+                 chat_id: int = None, qr_message_id: int = None,
+                 is_customer: bool = False) -> bool:
+    """Lưu payment mới vào Sheets khi tạo QR."""
+    try:
+        sheet = _get_payments_sheet()
+        sheet.append_row([
+            payment_code,
+            customer,
+            amount,
+            "pending",
+            str(chat_id or ""),
+            str(qr_message_id or ""),
+            "1" if is_customer else "0",
+            get_local_now(),
+        ])
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"save_payment error: {e}")
+        return False
+
+
+def get_payment(payment_code: str) -> Optional[Dict]:
+    """Tìm payment theo mã CK từ Sheets."""
+    try:
+        sheet = _get_payments_sheet()
+        records = safe_get_records(sheet)
+        for r in records:
+            if str(r.get('PaymentCode', '')).strip() == payment_code:
+                return {
+                    'payment_code': payment_code,
+                    'customer': r.get('Customer', ''),
+                    'amount': int(float(r.get('Amount', 0))),
+                    'status': r.get('Status', 'pending'),
+                    'chat_id': r.get('ChatID', ''),
+                    'qr_message_id': r.get('QrMessageID', ''),
+                    'is_customer': str(r.get('IsCustomer', '0')) == '1',
+                }
+        return None
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"get_payment error: {e}")
+        return None
+
+
+def mark_payment_paid(payment_code: str) -> bool:
+    """Đánh dấu payment đã thanh toán trong Sheets."""
+    try:
+        sheet = _get_payments_sheet()
+        records = safe_get_records(sheet)
+        for i, r in enumerate(records):
+            if str(r.get('PaymentCode', '')).strip() == payment_code:
+                # Row index = i + 2 (header + 0-indexed)
+                sheet.update_cell(i + 2, 4, "paid")  # Column 4 = Status
+                return True
+        return False
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"mark_payment_paid error: {e}")
+        return False
+
+
+def update_payment_meta_sheet(payment_code: str, chat_id: int = None,
+                               qr_message_id: int = None, is_customer: bool = None) -> bool:
+    """Cập nhật ChatID/QrMessageID sau khi gửi QR."""
+    try:
+        sheet = _get_payments_sheet()
+        records = safe_get_records(sheet)
+        for i, r in enumerate(records):
+            if str(r.get('PaymentCode', '')).strip() == payment_code:
+                row = i + 2
+                if chat_id is not None:
+                    sheet.update_cell(row, 5, str(chat_id))
+                if qr_message_id is not None:
+                    sheet.update_cell(row, 6, str(qr_message_id))
+                if is_customer is not None:
+                    sheet.update_cell(row, 7, "1" if is_customer else "0")
+                return True
+        return False
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"update_payment_meta error: {e}")
+        return False
+
