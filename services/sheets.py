@@ -1192,6 +1192,54 @@ def get_user_expenses_by_date(telegram_id: str, day: int, month: int = None, yea
     return expenses
 
 
+def get_user_available_months(telegram_id: str) -> List[Dict]:
+    """Get all months that have expense data for a user, excluding current month."""
+    months_set = set()
+    try:
+        sheet = _get_user_sheet(telegram_id)
+        records = safe_get_records(sheet)
+        for row in records:
+            date_str = row.get('Date', '')
+            if date_str:
+                try:
+                    dt = datetime.strptime(date_str, '%d/%m/%Y')
+                    months_set.add((dt.month, dt.year))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    
+    now = datetime.now(config.VN_TIMEZONE)
+    current = (now.month, now.year)
+    months_set.discard(current)
+    
+    result = [{'month': m, 'year': y} for m, y in months_set]
+    result.sort(key=lambda x: (x['year'], x['month']), reverse=True)
+    return result
+
+
+def get_user_recent_expenses(telegram_id: str, limit: int = 10) -> List[Dict]:
+    """Get the most recent expenses for a user (all dates, not just today)."""
+    try:
+        sheet = _get_user_sheet(telegram_id)
+        records = safe_get_records(sheet)
+        expenses = []
+        for i, row in enumerate(records, start=2):
+            amount = row.get('Amount', 0)
+            if amount:
+                expenses.append({
+                    'row': i,
+                    'date': row.get('Date', ''),
+                    'amount': float(amount),
+                    'description': row.get('Description', ''),
+                    'category': row.get('Category', ''),
+                })
+        expenses.reverse()
+        return expenses[:limit]
+    except Exception:
+        return []
+
+
 def delete_user_expense(telegram_id: str, row_num: int) -> bool:
     """Delete a user's expense by row number."""
     try:

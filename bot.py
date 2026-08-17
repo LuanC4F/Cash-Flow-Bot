@@ -124,7 +124,7 @@ async def global_permission_check(update: Update, context):
     if is_expense_user(user.id):
         if update.callback_query:
             data = update.callback_query.data or ''
-            if data.startswith(('uexp_', 'ucat_', 'ueditf_')):
+            if data.startswith(('uexp_', 'ucat_', 'ueditf_', 'uexp_hmonth_')):
                 return
         # Cho phép text input (conversation flow: nhập tiền, mô tả)
         if update.message and update.message.text and not update.message.text.startswith('/'):
@@ -502,6 +502,7 @@ def main():
         uexp_start, uexp_select_category, uexp_amount, uexp_desc, uexp_cancel,
         uexp_date_select, uexp_date_input,
         uexp_today, uexp_month, uexp_day_detail, uexp_menu,
+        uexp_history, uexp_history_month,
         uexp_delete_start, uexp_delete_confirm,
         uexp_edit_start, uexp_edit_select_row, uexp_edit_select_field, uexp_edit_save,
         UEXP_AMOUNT, UEXP_DESC, UEXP_DATE, UEXP_DELETE_ROW,
@@ -568,6 +569,8 @@ def main():
     application.add_handler(CallbackQueryHandler(uexp_today, pattern="^uexp_today$"))
     application.add_handler(CallbackQueryHandler(uexp_month, pattern="^uexp_month$"))
     application.add_handler(CallbackQueryHandler(uexp_day_detail, pattern="^uexp_day_"))
+    application.add_handler(CallbackQueryHandler(uexp_history, pattern="^uexp_history$"))
+    application.add_handler(CallbackQueryHandler(uexp_history_month, pattern="^uexp_hmonth_"))
     application.add_handler(CallbackQueryHandler(uexp_menu, pattern="^uexp_menu$"))
     
     # Callback handler cho inline buttons (menu navigation) - Phải ở CUỐI vì không có pattern

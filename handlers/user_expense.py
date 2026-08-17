@@ -39,6 +39,9 @@ def get_user_expense_menu():
             InlineKeyboardButton("📊 Tháng Này", callback_data="uexp_month"),
         ],
         [
+            InlineKeyboardButton("📜 Lịch Sử", callback_data="uexp_history"),
+        ],
+        [
             InlineKeyboardButton("✏️ Sửa Chi Tiêu", callback_data="uexp_edit"),
             InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="uexp_delete"),
         ],
@@ -373,32 +376,115 @@ async def uexp_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ==================== XÓA CHI TIÊU ====================
+# ==================== LỊCH SỬ THÁNG TRƯỚC ====================
 
-UEXP_DELETE_ROW = 10
-
-async def uexp_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bắt đầu xóa chi tiêu"""
+async def uexp_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hiện danh sách tháng có dữ liệu chi tiêu"""
     query = update.callback_query
     await query.answer()
     
     tid = str(update.effective_user.id)
     
     try:
-        expenses = sheets.get_user_today_expenses(tid)
+        months = sheets.get_user_available_months(tid)
+        
+        if not months:
+            await query.edit_message_text(
+                "📜 *LỊCH SỬ CHI TIÊU*\n\n📭 Chưa có dữ liệu tháng trước.",
+                parse_mode='Markdown',
+                reply_markup=get_user_expense_menu()
+            )
+            return
+        
+        text = "📜 *LỊCH SỬ CHI TIÊU*\n\n📅 Chọn tháng để xem:\n"
+        
+        keyboard = []
+        for m in months:
+            month_name = get_month_name(m['month'])
+            btn_text = f"📅 {month_name}/{m['year']}"
+            callback = f"uexp_hmonth_{m['month']}_{m['year']}"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback)])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="uexp_menu")])
+        
+        await query.edit_message_text(
+            text, parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu())
+
+
+async def uexp_history_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xem chi tiết chi tiêu 1 tháng trong lịch sử"""
+    query = update.callback_query
+    await query.answer()
+    
+    tid = str(update.effective_user.id)
+    
+    # Parse: uexp_hmonth_7_2026
+    parts = query.data.split('_')
+    month = int(parts[2])
+    year = int(parts[3])
+    
+    try:
+        summary = sheets.get_user_month_expense_summary(tid, month=month, year=year)
+        month_name = get_month_name(month)
+        
+        text = f"📜 CHI TIÊU {month_name.upper()}/{year}\n\n"
+        text += f"📝 Số lần chi: {summary['count']}\n"
+        text += f"💸 Tổng chi: {format_currency(summary['total'])}\n"
+        
+        if summary['by_category']:
+            text += "\n📂 Theo loại:\n"
+            sorted_cats = sorted(summary['by_category'].items(), key=lambda x: x[1], reverse=True)
+            for cat, amount in sorted_cats:
+                emoji = get_category_emoji(cat)
+                pct = (amount / summary['total'] * 100) if summary['total'] > 0 else 0
+                text += f"   {emoji} {cat}: {format_currency(amount)} ({pct:.0f}%)\n"
+        
+        if summary['by_day']:
+            text += "\n📅 Theo ngày:\n"
+            sorted_days = sorted(summary['by_day'].items())
+            for day, amount in sorted_days:
+                text += f"   • Ngày {day}: {format_currency(amount)}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔙 Lịch Sử", callback_data="uexp_history")],
+            [InlineKeyboardButton("🔙 Menu", callback_data="uexp_menu")],
+        ]
+        
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu())
+
+
+# ==================== XÓA CHI TIÊU ====================
+
+UEXP_DELETE_ROW = 10
+
+async def uexp_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bắt đầu xóa chi tiêu - hiện 10 khoản gần nhất"""
+    query = update.callback_query
+    await query.answer()
+    
+    tid = str(update.effective_user.id)
+    
+    try:
+        expenses = sheets.get_user_recent_expenses(tid, limit=10)
         
         if not expenses:
             await query.edit_message_text(
-                "🗑 *XÓA CHI TIÊU*\n\n📭 Chưa có chi tiêu nào hôm nay.",
+                "🗑 *XÓA CHI TIÊU*\n\n📭 Chưa có chi tiêu nào.",
                 parse_mode='Markdown',
                 reply_markup=get_user_expense_menu()
             )
             return ConversationHandler.END
         
-        text = "🗑 *XÓA CHI TIÊU*\n\n📋 *Chi tiêu hôm nay:*\n"
+        text = "🗑 *XÓA CHI TIÊU*\n\n📋 *10 khoản gần nhất:*\n"
         for e in expenses:
             emoji = get_category_emoji(e['category'])
-            text += f"• *Row {e['row']}*: {format_currency(e['amount'])} - {e['description']}\n"
+            text += f"• *Row {e['row']}*: {format_currency(e['amount'])} - {e['description']} ({e['date']})\n"
         text += "\n⚠️ Nhập số row cần xóa:"
         
         await query.edit_message_text(
@@ -446,24 +532,24 @@ async def uexp_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ==================== SỬA CHI TIÊU USER ====================
 
 async def uexp_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bắt đầu sửa chi tiêu - hiện danh sách hôm nay"""
+    """Bắt đầu sửa chi tiêu - hiện 10 khoản gần nhất"""
     query = update.callback_query
     await query.answer()
     
     tid = str(update.effective_user.id)
     
     try:
-        expenses = sheets.get_user_today_expenses(tid)
+        expenses = sheets.get_user_recent_expenses(tid, limit=10)
         
         if not expenses:
             await query.edit_message_text(
-                "✏️ *SỬA CHI TIÊU*\n\n📭 Chưa có chi tiêu nào hôm nay.",
+                "✏️ *SỬA CHI TIÊU*\n\n📭 Chưa có chi tiêu nào.",
                 parse_mode='Markdown',
                 reply_markup=get_user_expense_menu()
             )
             return ConversationHandler.END
         
-        text = "✏️ *SỬA CHI TIÊU*\n\n📋 *Chi tiêu hôm nay:*\n"
+        text = "✏️ *SỬA CHI TIÊU*\n\n📋 *10 khoản gần nhất:*\n"
         for e in expenses:
             emoji = get_category_emoji(e['category'])
             text += f"• *Row {e['row']}*: {format_currency(e['amount'])} - {e['description']} ({e['date']})\n"
