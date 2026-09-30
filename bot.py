@@ -643,6 +643,69 @@ def main():
     
     application.add_handler(CommandHandler("capquyen", capquyen_command))
     
+    # Admin: quản lý người sống chung
+    async def songchung_command(update: Update, context):
+        from utils.security import check_permission, UNAUTHORIZED_MESSAGE
+        if not check_permission(update.effective_user.id):
+            await update.message.reply_text(UNAUTHORIZED_MESSAGE)
+            return
+        from services import sheets
+        args = context.args
+        
+        # Không có args → hiện danh sách
+        if not args:
+            partners = sheets.get_shared_partners()
+            if not partners:
+                text = "🏘 *SỐNG CHUNG*\n\n📭 Chưa có ai.\n\n"
+            else:
+                text = "🏘 *SỐNG CHUNG*\n\n"
+                for p in partners:
+                    text += f"• 👤 {p['name']} — `{p['telegram_id']}`\n"
+                text += "\n"
+            text += (
+                "📌 *Cách dùng:*\n"
+                "`/songchung them <ID> <Tên>` — Thêm\n"
+                "`/songchung xoa <ID>` — Xóa"
+            )
+            await update.message.reply_text(text, parse_mode='Markdown')
+            return
+        
+        action = args[0].lower()
+        
+        if action == 'them' and len(args) >= 3:
+            tid = args[1]
+            name = ' '.join(args[2:])
+            try:
+                result = sheets.add_shared_partner(tid, name)
+                await update.message.reply_text(
+                    f"✅ Đã thêm người sống chung!\n\n"
+                    f"👤 Tên: {name}\n"
+                    f"📱 TID: `{tid}`\n\n"
+                    f"_Người này giờ thấy mục '🏘 Sống chung' khi ghi chi tiêu._",
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                await update.message.reply_text(f"❌ Lỗi: {e}")
+        
+        elif action == 'xoa' and len(args) >= 2:
+            tid = args[1]
+            success = sheets.remove_shared_partner(tid)
+            if success:
+                await update.message.reply_text(f"✅ Đã xóa `{tid}` khỏi sống chung.", parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"❌ Không tìm thấy `{tid}`.", parse_mode='Markdown')
+        
+        else:
+            await update.message.reply_text(
+                "❓ Cách dùng:\n"
+                "`/songchung` — Xem danh sách\n"
+                "`/songchung them <ID> <Tên>`\n"
+                "`/songchung xoa <ID>`",
+                parse_mode='Markdown'
+            )
+    
+    application.add_handler(CommandHandler("songchung", songchung_command))
+    
     # Handler cho lệnh không xác định
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     

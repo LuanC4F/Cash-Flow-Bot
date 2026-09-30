@@ -217,9 +217,13 @@ async def _save_expense(query, context, date):
     amount = context.user_data.get('expense_amount', 0)
     category = context.user_data.get('expense_category', 'Living')
     description = context.user_data.get('expense_desc', '')
+    added_by = query.from_user.first_name or 'Admin'
     
     try:
-        result = sheets.add_expense(amount, description, category, date=date)
+        if category == 'Shared':
+            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+        else:
+            result = sheets.add_expense(amount, description, category, date=date)
         emoji = get_category_emoji(category)
         
         text = f"""✅ ĐÃ GHI CHI TIÊU!
@@ -229,9 +233,14 @@ async def _save_expense(query, context, date):
 {emoji} Loại: {category}
 📅 Ngày: {result['date']}
 """
-        today_summary = sheets.get_today_expense_summary()
-        text += f"━━━ Chi tiêu hôm nay ━━━\n"
-        text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
+        if category == 'Shared':
+            shared = sheets.get_shared_today_summary()
+            text += f"━━━ Sống chung hôm nay ━━━\n"
+            text += f"📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
+        else:
+            today_summary = sheets.get_today_expense_summary()
+            text += f"━━━ Chi tiêu hôm nay ━━━\n"
+            text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
         
         await query.edit_message_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:
@@ -246,9 +255,13 @@ async def _save_expense_msg(update, context, date):
     amount = context.user_data.get('expense_amount', 0)
     category = context.user_data.get('expense_category', 'Living')
     description = context.user_data.get('expense_desc', '')
+    added_by = update.effective_user.first_name or 'Admin'
     
     try:
-        result = sheets.add_expense(amount, description, category, date=date)
+        if category == 'Shared':
+            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+        else:
+            result = sheets.add_expense(amount, description, category, date=date)
         emoji = get_category_emoji(category)
         
         text = f"""✅ ĐÃ GHI CHI TIÊU!
@@ -258,9 +271,14 @@ async def _save_expense_msg(update, context, date):
 {emoji} Loại: {category}
 📅 Ngày: {result['date']}
 """
-        today_summary = sheets.get_today_expense_summary()
-        text += f"━━━ Chi tiêu hôm nay ━━━\n"
-        text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
+        if category == 'Shared':
+            shared = sheets.get_shared_today_summary()
+            text += f"━━━ Sống chung hôm nay ━━━\n"
+            text += f"📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
+        else:
+            today_summary = sheets.get_today_expense_summary()
+            text += f"━━━ Chi tiêu hôm nay ━━━\n"
+            text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
         
         await update.message.reply_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:

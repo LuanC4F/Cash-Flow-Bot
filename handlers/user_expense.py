@@ -50,13 +50,15 @@ def get_user_expense_menu():
     return InlineKeyboardMarkup(keyboard)
 
 
-def get_user_category_keyboard():
-    """Keyboard chọn category cho user"""
+def get_user_category_keyboard(user_id: int = None):
+    """Keyboard chọn category cho user. 'Sống chung' chỉ hiện cho admin + partner."""
+    from utils.security import is_shared_expense_user
     keyboard = []
     row = []
-    for i, (cat, emoji, name) in enumerate(CATEGORIES):
+    filtered = [c for c in CATEGORIES if c[0] != 'Shared' or is_shared_expense_user(user_id or 0)]
+    for i, (cat, emoji, name) in enumerate(filtered):
         row.append(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"ucat_{cat}"))
-        if len(row) == 2 or i == len(CATEGORIES) - 1:
+        if len(row) == 2 or i == len(filtered) - 1:
             keyboard.append(row)
             row = []
     keyboard.append([InlineKeyboardButton("❌ Hủy", callback_data="uexp_cancel")])
@@ -81,7 +83,7 @@ async def uexp_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📝 *Bước 1/3:* Chọn loại chi tiêu\n\n"
             "👇 Chọn category:",
             parse_mode='Markdown',
-            reply_markup=get_user_category_keyboard()
+            reply_markup=get_user_category_keyboard(update.effective_user.id)
         )
         return UEXP_AMOUNT
     return UEXP_AMOUNT
@@ -203,13 +205,21 @@ async def _uexp_save_cb(query, context, date):
     category = context.user_data.get('uexp_category', 'Living')
     description = context.user_data.get('uexp_desc', '')
     tid = str(query.from_user.id)
+    added_by = query.from_user.first_name or tid
     
     try:
-        result = sheets.add_user_expense(tid, amount, description, category, date=date)
+        if category == 'Shared':
+            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+        else:
+            result = sheets.add_user_expense(tid, amount, description, category, date=date)
         emoji = get_category_emoji(category)
         text = f"✅ ĐÃ GHI CHI TIÊU!\n\n💸 Số tiền: {format_currency(amount)}\n📝 Mô tả: {description}\n{emoji} Loại: {category}\n📅 Ngày: {result['date']}\n"
-        today = sheets.get_user_today_expense_summary(tid)
-        text += f"━━━ Chi tiêu hôm nay ━━━\n📊 Số lần: {today['count']} | 💸 Tổng: {format_currency(today['total'])}"
+        if category == 'Shared':
+            shared = sheets.get_shared_today_summary()
+            text += f"━━━ Sống chung hôm nay ━━━\n📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
+        else:
+            today = sheets.get_user_today_expense_summary(tid)
+            text += f"━━━ Chi tiêu hôm nay ━━━\n📊 Số lần: {today['count']} | 💸 Tổng: {format_currency(today['total'])}"
         await query.edit_message_text(text, reply_markup=get_user_expense_menu())
     except Exception as e:
         await query.edit_message_text(f"❌ Lỗi: {str(e)}")
@@ -224,13 +234,21 @@ async def _uexp_save_msg(update, context, date):
     category = context.user_data.get('uexp_category', 'Living')
     description = context.user_data.get('uexp_desc', '')
     tid = str(update.effective_user.id)
+    added_by = update.effective_user.first_name or tid
     
     try:
-        result = sheets.add_user_expense(tid, amount, description, category, date=date)
+        if category == 'Shared':
+            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+        else:
+            result = sheets.add_user_expense(tid, amount, description, category, date=date)
         emoji = get_category_emoji(category)
         text = f"✅ ĐÃ GHI CHI TIÊU!\n\n💸 Số tiền: {format_currency(amount)}\n📝 Mô tả: {description}\n{emoji} Loại: {category}\n📅 Ngày: {result['date']}\n"
-        today = sheets.get_user_today_expense_summary(tid)
-        text += f"━━━ Chi tiêu hôm nay ━━━\n📊 Số lần: {today['count']} | 💸 Tổng: {format_currency(today['total'])}"
+        if category == 'Shared':
+            shared = sheets.get_shared_today_summary()
+            text += f"━━━ Sống chung hôm nay ━━━\n📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
+        else:
+            today = sheets.get_user_today_expense_summary(tid)
+            text += f"━━━ Chi tiêu hôm nay ━━━\n📊 Số lần: {today['count']} | 💸 Tổng: {format_currency(today['total'])}"
         await update.message.reply_text(text, reply_markup=get_user_expense_menu())
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")

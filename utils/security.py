@@ -27,4 +27,12 @@ def is_expense_user(user_id: int) -> bool:
     return sheets.is_expense_user(str(user_id))
 
 
+def is_shared_expense_user(user_id: int) -> bool:
+    """Kiểm tra user có quyền ghi 'Sống chung' không (admin + partner từ Sheets)"""
+    if check_permission(user_id):
+        return True
+    from services import sheets
+    return sheets.is_shared_partner(user_id)
+
+
 UNAUTHORIZED_MESSAGE = "🚫 Đi chỗ khác chơi, đại ca Luân mới được phép dùng bot này 👌."

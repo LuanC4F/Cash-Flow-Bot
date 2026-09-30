@@ -493,15 +493,22 @@ def get_today_expenses() -> List[Dict]:
 
 
 def get_today_expense_summary() -> Dict:
-    """Get today's expense summary"""
+    """Get today's expense summary (including shared expenses)"""
     expenses = get_today_expenses()
+    
+    # Cộng thêm chi phí sống chung
+    try:
+        shared = get_shared_today_expenses()
+        expenses = expenses + shared
+    except Exception:
+        pass
     
     total = sum(e['amount'] for e in expenses)
     
     # Total by category
     by_category = {}
     for e in expenses:
-        cat = e['category'] or 'Other'
+        cat = e.get('category') or 'Other'
         by_category[cat] = by_category.get(cat, 0) + e['amount']
     
     return {
@@ -542,6 +549,18 @@ def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
                     by_day[day] = by_day.get(day, 0) + amount
             except ValueError:
                 pass
+    
+    # Cộng thêm chi phí sống chung từ Chi_Shared
+    try:
+        shared = get_shared_month_summary(month=month, year=year)
+        if shared['count'] > 0:
+            total += shared['total']
+            count += shared['count']
+            by_category['Shared'] = by_category.get('Shared', 0) + shared['total']
+            for day, amt in shared['by_day'].items():
+                by_day[day] = by_day.get(day, 0) + amt
+    except Exception:
+        pass
     
     return {
         'month': month,
@@ -1244,6 +1263,232 @@ def delete_user_expense(telegram_id: str, row_num: int) -> bool:
     """Delete a user's expense by row number."""
     try:
         sheet = _get_user_sheet(telegram_id)
+        sheet.delete_rows(row_num)
+        return True
+    except Exception:
+        return False
+
+
+# ==================== SHARED EXPENSE (Sống chung) ====================
+
+SHARED_SHEET = "Chi_Shared"
+SHARED_HEADERS = ["Date", "Amount", "Description", "Category", "AddedBy"]
+
+SETTINGS_SHEET = "Settings"
+
+# Cache shared partners
+_shared_partners_cache = None
+_shared_partners_cache_time = 0
+
+
+def _get_settings_sheet():
+    """Get or create Settings sheet."""
+    sp = get_client()
+    try:
+        return sp.worksheet(SETTINGS_SHEET)
+    except gspread.WorksheetNotFound:
+        sheet = sp.add_worksheet(title=SETTINGS_SHEET, rows=50, cols=3)
+        sheet.append_row(["Key", "Value", "Note"])
+        return sheet
+
+
+def get_shared_partners() -> List[Dict]:
+    """Lấy danh sách người sống chung từ Settings sheet."""
+    global _shared_partners_cache, _shared_partners_cache_time
+    
+    if time.time() - _shared_partners_cache_time < 60 and _shared_partners_cache is not None:
+        return _shared_partners_cache
+    
+    partners = []
+    try:
+        sheet = _get_settings_sheet()
+        records = safe_get_records(sheet)
+        for i, row in enumerate(records, start=2):
+            if str(row.get('Key', '')).strip() == 'shared_partner':
+                tid = _normalize_tid(row.get('Value', ''))
+                if tid:
+                    partners.append({
+                        'row': i,
+                        'telegram_id': tid,
+                        'name': str(row.get('Note', '')).strip(),
+                    })
+        _shared_partners_cache = partners
+        _shared_partners_cache_time = time.time()
+    except Exception as e:
+        _logger.error(f"get_shared_partners error: {e}")
+        if _shared_partners_cache is not None:
+            return _shared_partners_cache
+    return partners
+
+
+def is_shared_partner(telegram_id) -> bool:
+    """Kiểm tra user có phải người sống chung không."""
+    tid = _normalize_tid(telegram_id)
+    return any(p['telegram_id'] == tid for p in get_shared_partners())
+
+
+def add_shared_partner(telegram_id: str, name: str) -> Dict:
+    """Thêm người sống chung."""
+    global _shared_partners_cache_time
+    _shared_partners_cache_time = 0
+    
+    tid = str(telegram_id).strip()
+    
+    # Check đã tồn tại chưa
+    for p in get_shared_partners():
+        if p['telegram_id'] == _normalize_tid(tid):
+            return p
+    
+    sheet = _get_settings_sheet()
+    sheet.append_row(['shared_partner', tid, name], value_input_option='USER_ENTERED')
+    
+    # Cũng cấp quyền expense user nếu chưa có
+    if not is_expense_user(tid):
+        add_expense_user(tid, name)
+    
+    return {'telegram_id': tid, 'name': name}
+
+
+def remove_shared_partner(telegram_id: str) -> bool:
+    """Xóa người sống chung."""
+    global _shared_partners_cache_time
+    _shared_partners_cache_time = 0
+    
+    tid = _normalize_tid(telegram_id)
+    try:
+        sheet = _get_settings_sheet()
+        records = safe_get_records(sheet)
+        for i, row in enumerate(records, start=2):
+            if str(row.get('Key', '')).strip() == 'shared_partner':
+                if _normalize_tid(row.get('Value', '')) == tid:
+                    sheet.delete_rows(i)
+                    return True
+        return False
+    except Exception:
+        return False
+
+
+def _get_shared_sheet():
+    """Get or create shared expense sheet."""
+    sp = get_client()
+    try:
+        return sp.worksheet(SHARED_SHEET)
+    except gspread.WorksheetNotFound:
+        sheet = sp.add_worksheet(title=SHARED_SHEET, rows=1000, cols=len(SHARED_HEADERS))
+        sheet.append_row(SHARED_HEADERS)
+        return sheet
+
+
+def add_shared_expense(amount: float, description: str, added_by: str = "", date: str = None) -> Dict:
+    """Ghi chi tiêu vào sheet chung 'Sống chung'."""
+    sheet = _get_shared_sheet()
+    if date is None:
+        date = get_local_date()
+    sheet.append_row([date, amount, description, "Shared", added_by], value_input_option='USER_ENTERED')
+    return {'date': date, 'amount': amount, 'description': description, 'category': 'Shared', 'added_by': added_by}
+
+
+def get_shared_today_expenses() -> List[Dict]:
+    """Lấy chi tiêu chung hôm nay."""
+    today = get_local_date()
+    try:
+        sheet = _get_shared_sheet()
+        records = safe_get_records(sheet)
+        expenses = []
+        for i, row in enumerate(records, start=2):
+            if row.get('Date', '') == today and row.get('Amount'):
+                expenses.append({
+                    'row': i,
+                    'date': today,
+                    'amount': float(row['Amount']),
+                    'description': row.get('Description', ''),
+                    'category': 'Shared',
+                    'added_by': row.get('AddedBy', ''),
+                })
+        return expenses
+    except Exception:
+        return []
+
+
+def get_shared_today_summary() -> Dict:
+    """Tổng kết chi tiêu chung hôm nay."""
+    expenses = get_shared_today_expenses()
+    return {
+        'count': len(expenses),
+        'total': sum(e['amount'] for e in expenses),
+    }
+
+
+def get_shared_month_summary(month: int = None, year: int = None) -> Dict:
+    """Tổng kết chi tiêu chung theo tháng."""
+    now = datetime.now(config.VN_TIMEZONE)
+    if month is None:
+        month = now.month
+    if year is None:
+        year = now.year
+    
+    try:
+        sheet = _get_shared_sheet()
+        records = safe_get_records(sheet)
+        
+        total = 0
+        count = 0
+        by_day = {}
+        by_person = {}
+        
+        for row in records:
+            date_str = row.get('Date', '')
+            amount = row.get('Amount', 0)
+            if not date_str or not amount:
+                continue
+            try:
+                dt = datetime.strptime(date_str, '%d/%m/%Y')
+                if dt.month == month and dt.year == year:
+                    amt = float(amount)
+                    total += amt
+                    count += 1
+                    day = dt.day
+                    by_day[day] = by_day.get(day, 0) + amt
+                    person = row.get('AddedBy', 'Unknown')
+                    by_person[person] = by_person.get(person, 0) + amt
+            except ValueError:
+                continue
+        
+        return {
+            'month': month, 'year': year,
+            'count': count, 'total': total,
+            'by_day': by_day, 'by_person': by_person,
+        }
+    except Exception:
+        return {'month': month, 'year': year, 'count': 0, 'total': 0, 'by_day': {}, 'by_person': {}}
+
+
+def get_shared_recent_expenses(limit: int = 10) -> List[Dict]:
+    """Lấy các khoản chi chung gần nhất."""
+    try:
+        sheet = _get_shared_sheet()
+        records = safe_get_records(sheet)
+        expenses = []
+        for i, row in enumerate(records, start=2):
+            if row.get('Amount'):
+                expenses.append({
+                    'row': i,
+                    'date': row.get('Date', ''),
+                    'amount': float(row['Amount']),
+                    'description': row.get('Description', ''),
+                    'category': 'Shared',
+                    'added_by': row.get('AddedBy', ''),
+                })
+        expenses.reverse()
+        return expenses[:limit]
+    except Exception:
+        return []
+
+
+def delete_shared_expense(row_num: int) -> bool:
+    """Xóa chi tiêu chung theo row."""
+    try:
+        sheet = _get_shared_sheet()
         sheet.delete_rows(row_num)
         return True
     except Exception:
