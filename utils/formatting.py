@@ -143,6 +143,7 @@ def get_category_emoji(category: str) -> str:
         'health': '🏥',
         'food': '🍜',
         'transport': '🚗',
+        'shared': '🏘',
         'other': '📝',
     }
     return emojis.get(category.lower(), '📝')

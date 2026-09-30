@@ -25,6 +25,7 @@ CATEGORIES = [
     ("Transport", "🚗", "Di chuyển"),
     ("Health", "🏥", "Sức khỏe"),
     ("Entertainment", "🎮", "Giải trí"),
+    ("Shared", "🏘", "Sống chung"),
 ]
 
 
