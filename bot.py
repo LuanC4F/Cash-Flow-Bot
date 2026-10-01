@@ -573,6 +573,25 @@ def main():
     application.add_handler(CallbackQueryHandler(uexp_history_month, pattern="^uexp_hmonth_"))
     application.add_handler(CallbackQueryHandler(uexp_menu, pattern="^uexp_menu$"))
     
+    # ==================== THÊM NGƯỜI SỐNG CHUNG (Conversation) ====================
+    from handlers.basic import (
+        addshared_start, addshared_tid, addshared_name, addshared_cancel,
+        ADDSHARED_TID, ADDSHARED_NAME
+    )
+    addshared_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(addshared_start, pattern="^admin_addshared$")],
+        states={
+            ADDSHARED_TID: [MessageHandler(filters.TEXT & ~filters.COMMAND, addshared_tid)],
+            ADDSHARED_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, addshared_name)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(addshared_cancel, pattern="^addshared_cancel$"),
+            CommandHandler("cancel", addshared_cancel),
+        ],
+        per_message=False,
+    )
+    application.add_handler(addshared_conv)
+    
     # Callback handler cho inline buttons (menu navigation) - Phải ở CUỐI vì không có pattern
     application.add_handler(CallbackQueryHandler(button_callback))
     

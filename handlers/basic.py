@@ -467,7 +467,7 @@ Xem báo cáo thu chi và lợi nhuận:
         else:
             text += "📭 Chưa có ai.\n"
         
-        text += "\n➕ Để thêm: `/songchung them <TelegramID> <Tên>`"
+        text += "\n📌 Bấm ➕ để thêm người sống chung"
         
         keyboard = []
         for p in partners:
@@ -475,6 +475,7 @@ Xem báo cáo thu chi và lợi nhuận:
                 f"❌ Xóa: {p['name']}",
                 callback_data=f"admin_rmshared_{p['telegram_id']}"
             )])
+        keyboard.append([InlineKeyboardButton("➕ Thêm người", callback_data="admin_addshared")])
         keyboard.append([InlineKeyboardButton("🔙 Quản Lý User", callback_data="admin_users")])
         keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="menu_main")])
         
@@ -1053,3 +1054,96 @@ Xem báo cáo thu chi và lợi nhuận:
             await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
         except Exception as e:
             await safe_edit(query, f"❌ Lỗi: {str(e)}", get_back_keyboard())
+
+
+# ==================== THÊM NGƯỜI SỐNG CHUNG (Conversation) ====================
+
+ADDSHARED_TID, ADDSHARED_NAME = range(50, 52)
+
+
+async def addshared_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bấm ➕ Thêm người → hỏi Telegram ID"""
+    query = update.callback_query
+    await query.answer()
+    
+    cancel_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Hủy", callback_data="addshared_cancel")]
+    ])
+    
+    await query.edit_message_text(
+        "➕ *THÊM NGƯỜI SỐNG CHUNG*\n\n"
+        "📱 Nhập Telegram ID của người đó:\n\n"
+        "_Bảo họ chat với @userinfobot để lấy ID_",
+        parse_mode='Markdown',
+        reply_markup=cancel_kb
+    )
+    return ADDSHARED_TID
+
+
+async def addshared_tid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Nhận Telegram ID, hỏi tên"""
+    tid = update.message.text.strip()
+    
+    # Validate
+    if not tid.isdigit():
+        cancel_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Hủy", callback_data="addshared_cancel")]
+        ])
+        await update.message.reply_text(
+            "❌ ID phải là số! Nhập lại:",
+            reply_markup=cancel_kb
+        )
+        return ADDSHARED_TID
+    
+    context.user_data['addshared_tid'] = tid
+    
+    cancel_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Hủy", callback_data="addshared_cancel")]
+    ])
+    await update.message.reply_text(
+        f"✅ ID: `{tid}`\n\n👤 Nhập tên người đó:",
+        parse_mode='Markdown',
+        reply_markup=cancel_kb
+    )
+    return ADDSHARED_NAME
+
+
+async def addshared_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Nhận tên, lưu"""
+    name = update.message.text.strip()
+    tid = context.user_data.get('addshared_tid', '')
+    
+    from services import sheets
+    try:
+        sheets.add_shared_partner(tid, name)
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Sống Chung", callback_data="admin_shared")],
+            [InlineKeyboardButton("🔙 Menu", callback_data="menu_main")],
+        ])
+        await update.message.reply_text(
+            f"✅ Đã thêm người sống chung!\n\n"
+            f"👤 Tên: {name}\n"
+            f"📱 ID: `{tid}`\n\n"
+            f"_Người này giờ thấy mục '🏘 Sống chung' khi ghi chi tiêu._",
+            parse_mode='Markdown',
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def addshared_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hủy thêm người"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Sống Chung", callback_data="admin_shared")],
+        ])
+        await query.edit_message_text("❌ Đã hủy.", reply_markup=keyboard)
+    context.user_data.clear()
+    return ConversationHandler.END
