@@ -176,6 +176,8 @@ async def error_handler(update: Update, context):
         return
     
     logger.error(f"Exception while handling an update: {context.error}")
+    import traceback
+    logger.error(traceback.format_exc())
     
     if update and update.effective_message:
         try:
