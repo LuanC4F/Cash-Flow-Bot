@@ -435,6 +435,7 @@ Xem báo cáo thu chi và lợi nhuận:
                 f"❌ Thu hồi: {u['name']}", 
                 callback_data=f"admin_rmuser_{u['telegram_id']}"
             )])
+        keyboard.append([InlineKeyboardButton("🏨 Sống Chung", callback_data="admin_shared")])
         keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="menu_main")])
         
         await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
@@ -451,6 +452,46 @@ Xem báo cáo thu chi và lợi nhuận:
         
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quản Lý User", callback_data="admin_users")],
+            [InlineKeyboardButton("🔙 Menu", callback_data="menu_main")],
+        ])
+        await safe_edit(query, text, keyboard)
+    
+    elif data == "admin_shared":
+        from services import sheets
+        partners = sheets.get_shared_partners()
+        
+        text = "🏨 *SỐNG CHUNG*\n\n"
+        if partners:
+            for p in partners:
+                text += f"• 👤 {p['name']} (`{p['telegram_id']}`)\n"
+        else:
+            text += "📭 Chưa có ai.\n"
+        
+        text += "\n➕ Để thêm: `/songchung them <TelegramID> <Tên>`"
+        
+        keyboard = []
+        for p in partners:
+            keyboard.append([InlineKeyboardButton(
+                f"❌ Xóa: {p['name']}",
+                callback_data=f"admin_rmshared_{p['telegram_id']}"
+            )])
+        keyboard.append([InlineKeyboardButton("🔙 Quản Lý User", callback_data="admin_users")])
+        keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="menu_main")])
+        
+        await safe_edit(query, text, InlineKeyboardMarkup(keyboard))
+    
+    elif data.startswith("admin_rmshared_"):
+        from services import sheets
+        tid = data.replace("admin_rmshared_", "")
+        
+        success = sheets.remove_shared_partner(tid)
+        if success:
+            text = f"✅ Đã xóa `{tid}` khỏi sống chung."
+        else:
+            text = f"❌ Không tìm thấy `{tid}`."
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Sống Chung", callback_data="admin_shared")],
             [InlineKeyboardButton("🔙 Menu", callback_data="menu_main")],
         ])
         await safe_edit(query, text, keyboard)
