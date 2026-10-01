@@ -218,10 +218,11 @@ async def _save_expense(query, context, date):
     category = context.user_data.get('expense_category', 'Living')
     description = context.user_data.get('expense_desc', '')
     added_by = query.from_user.first_name or 'Admin'
+    admin_tid = str(query.from_user.id)
     
     try:
         if category == 'Shared':
-            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+            result = sheets.add_shared_expense(amount, description, added_by_name=added_by, added_by_tid=admin_tid, date=date)
         else:
             result = sheets.add_expense(amount, description, category, date=date)
         emoji = get_category_emoji(category)
@@ -256,10 +257,11 @@ async def _save_expense_msg(update, context, date):
     category = context.user_data.get('expense_category', 'Living')
     description = context.user_data.get('expense_desc', '')
     added_by = update.effective_user.first_name or 'Admin'
+    admin_tid = str(update.effective_user.id)
     
     try:
         if category == 'Shared':
-            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+            result = sheets.add_shared_expense(amount, description, added_by_name=added_by, added_by_tid=admin_tid, date=date)
         else:
             result = sheets.add_expense(amount, description, category, date=date)
         emoji = get_category_emoji(category)

@@ -124,7 +124,7 @@ async def global_permission_check(update: Update, context):
     if is_expense_user(user.id):
         if update.callback_query:
             data = update.callback_query.data or ''
-            if data.startswith(('uexp_', 'ucat_', 'ueditf_', 'uexp_hmonth_')):
+            if data.startswith(('uexp_', 'ucat_', 'ueditf_', 'uexp_hmonth_', 'shared_day_')):
                 return
         # Cho phép text input (conversation flow: nhập tiền, mô tả)
         if update.message and update.message.text and not update.message.text.startswith('/'):
@@ -574,6 +574,11 @@ def main():
     application.add_handler(CallbackQueryHandler(uexp_history, pattern="^uexp_history$"))
     application.add_handler(CallbackQueryHandler(uexp_history_month, pattern="^uexp_hmonth_"))
     application.add_handler(CallbackQueryHandler(uexp_menu, pattern="^uexp_menu$"))
+    
+    # Thống kê sống chung
+    from handlers.user_expense import uexp_shared_stats, uexp_shared_day
+    application.add_handler(CallbackQueryHandler(uexp_shared_stats, pattern="^uexp_shared_stats$"))
+    application.add_handler(CallbackQueryHandler(uexp_shared_day, pattern="^shared_day_"))
     
     # ==================== THÊM NGƯỜI SỐNG CHUNG (Conversation) ====================
     from handlers.basic import (

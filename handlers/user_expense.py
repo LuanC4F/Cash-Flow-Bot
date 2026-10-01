@@ -31,8 +31,9 @@ CATEGORIES = [
 
 # ==================== KEYBOARDS ====================
 
-def get_user_expense_menu():
+def get_user_expense_menu(user_id: int = None):
     """Menu chi tiêu cho user"""
+    from utils.security import is_shared_expense_user
     keyboard = [
         [InlineKeyboardButton("💸 Ghi Chi Tiêu", callback_data="uexp_add")],
         [
@@ -47,6 +48,8 @@ def get_user_expense_menu():
             InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="uexp_delete"),
         ],
     ]
+    if user_id and is_shared_expense_user(user_id):
+        keyboard.insert(3, [InlineKeyboardButton("🏘 Thống Kê Sống Chung", callback_data="uexp_shared_stats")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -209,7 +212,7 @@ async def _uexp_save_cb(query, context, date):
     
     try:
         if category == 'Shared':
-            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+            result = sheets.add_shared_expense(amount, description, added_by_name=added_by, added_by_tid=tid, date=date)
         else:
             result = sheets.add_user_expense(tid, amount, description, category, date=date)
         emoji = get_category_emoji(category)
@@ -220,7 +223,7 @@ async def _uexp_save_cb(query, context, date):
         else:
             today = sheets.get_user_today_expense_summary(tid)
             text += f"━━━ Chi tiêu hôm nay ━━━\n📊 Số lần: {today['count']} | 💸 Tổng: {format_currency(today['total'])}"
-        await query.edit_message_text(text, reply_markup=get_user_expense_menu())
+        await query.edit_message_text(text, reply_markup=get_user_expense_menu(query.from_user.id))
     except Exception as e:
         await query.edit_message_text(f"❌ Lỗi: {str(e)}")
     
@@ -238,7 +241,7 @@ async def _uexp_save_msg(update, context, date):
     
     try:
         if category == 'Shared':
-            result = sheets.add_shared_expense(amount, description, added_by=added_by, date=date)
+            result = sheets.add_shared_expense(amount, description, added_by_name=added_by, added_by_tid=tid, date=date)
         else:
             result = sheets.add_user_expense(tid, amount, description, category, date=date)
         emoji = get_category_emoji(category)
@@ -249,7 +252,7 @@ async def _uexp_save_msg(update, context, date):
         else:
             today = sheets.get_user_today_expense_summary(tid)
             text += f"━━━ Chi tiêu hôm nay ━━━\n📊 Số lần: {today['count']} | 💸 Tổng: {format_currency(today['total'])}"
-        await update.message.reply_text(text, reply_markup=get_user_expense_menu())
+        await update.message.reply_text(text, reply_markup=get_user_expense_menu(update.effective_user.id))
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
     
@@ -264,7 +267,7 @@ async def uexp_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         await query.edit_message_text(
             "❌ Đã hủy.",
-            reply_markup=get_user_expense_menu()
+            reply_markup=get_user_expense_menu(update.effective_user.id)
         )
     context.user_data.clear()
     return ConversationHandler.END
@@ -293,9 +296,9 @@ async def uexp_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"\n━━━━━━━━━━━━━━━━━\n"
             text += f"💸 Tổng: {format_currency(summary['total'])}"
         
-        await query.edit_message_text(text, reply_markup=get_user_expense_menu())
+        await query.edit_message_text(text, reply_markup=get_user_expense_menu(update.effective_user.id))
     except Exception as e:
-        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu())
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu(update.effective_user.id))
 
 
 async def uexp_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -348,7 +351,7 @@ async def uexp_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
-        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu())
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu(update.effective_user.id))
 
 
 async def uexp_day_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -379,7 +382,7 @@ async def uexp_day_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
-        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu())
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu(update.effective_user.id))
 
 
 async def uexp_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -391,7 +394,7 @@ async def uexp_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         f"💸 *CHI TIÊU CỦA BẠN*\n\nXin chào {user.first_name or 'bạn'}!\n📌 Chọn chức năng:",
         parse_mode='Markdown',
-        reply_markup=get_user_expense_menu()
+        reply_markup=get_user_expense_menu(update.effective_user.id)
     )
 
 
@@ -411,7 +414,7 @@ async def uexp_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "📜 *LỊCH SỬ CHI TIÊU*\n\n📭 Chưa có dữ liệu tháng trước.",
                 parse_mode='Markdown',
-                reply_markup=get_user_expense_menu()
+                reply_markup=get_user_expense_menu(update.effective_user.id)
             )
             return
         
@@ -431,7 +434,7 @@ async def uexp_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     except Exception as e:
-        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu())
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu(update.effective_user.id))
 
 
 async def uexp_history_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -475,7 +478,7 @@ async def uexp_history_month(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
-        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu())
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu(update.effective_user.id))
 
 
 # ==================== XÓA CHI TIÊU ====================
@@ -496,7 +499,7 @@ async def uexp_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "🗑 *XÓA CHI TIÊU*\n\n📭 Chưa có chi tiêu nào.",
                 parse_mode='Markdown',
-                reply_markup=get_user_expense_menu()
+                reply_markup=get_user_expense_menu(update.effective_user.id)
             )
             return ConversationHandler.END
         
@@ -535,12 +538,12 @@ async def uexp_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(
                 f"✅ *Đã xóa chi tiêu ở row {row_num}*",
                 parse_mode='Markdown',
-                reply_markup=get_user_expense_menu()
+                reply_markup=get_user_expense_menu(update.effective_user.id)
             )
         else:
             await update.message.reply_text(
                 f"❌ Không thể xóa row {row_num}.",
-                reply_markup=get_user_expense_menu()
+                reply_markup=get_user_expense_menu(update.effective_user.id)
             )
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
@@ -564,7 +567,7 @@ async def uexp_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "✏️ *SỬA CHI TIÊU*\n\n📭 Chưa có chi tiêu nào.",
                 parse_mode='Markdown',
-                reply_markup=get_user_expense_menu()
+                reply_markup=get_user_expense_menu(update.effective_user.id)
             )
             return ConversationHandler.END
         
@@ -660,12 +663,99 @@ async def uexp_edit_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"✅ Đã sửa *Row {row_num}* — {field}: `{value}`",
                 parse_mode='Markdown',
-                reply_markup=get_user_expense_menu()
+                reply_markup=get_user_expense_menu(update.effective_user.id)
             )
         else:
-            await update.message.reply_text(f"❌ Không thể sửa.", reply_markup=get_user_expense_menu())
+            await update.message.reply_text(f"❌ Không thể sửa.", reply_markup=get_user_expense_menu(update.effective_user.id))
     except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi: {e}", reply_markup=get_user_expense_menu())
+        await update.message.reply_text(f"❌ Lỗi: {e}", reply_markup=get_user_expense_menu(update.effective_user.id))
     
     context.user_data.clear()
     return ConversationHandler.END
+
+
+# ==================== THỐNG KÊ SỐNG CHUNG ====================
+
+async def uexp_shared_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Thống kê sống chung tháng này"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        summary = sheets.get_shared_month_summary()
+        month = summary['month']
+        year = summary['year']
+        
+        text = f"🏘 *THỐNG KÊ SỐNG CHUNG*\n📅 Tháng {month}/{year}\n\n"
+        
+        if summary['count'] == 0:
+            text += "📭 Chưa có chi tiêu sống chung nào."
+            keyboard = [[InlineKeyboardButton("🔙 Menu", callback_data="uexp_menu")]]
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            return
+        
+        text += f"💰 *Tổng:* {format_currency(summary['total'])}\n"
+        text += f"📊 *Số lần:* {summary['count']}\n\n"
+        
+        # Mỗi người chi bao nhiêu
+        if summary['by_person']:
+            text += "👥 *Chi tiết theo người:*\n"
+            for person, amt in summary['by_person'].items():
+                pct = (amt / summary['total'] * 100) if summary['total'] > 0 else 0
+                text += f"• {person}: {format_currency(amt)} ({pct:.0f}%)\n"
+            text += "\n"
+        
+        # Buttons theo ngày
+        text += "📅 *Bấm ngày để xem chi tiết:*"
+        
+        keyboard = []
+        sorted_days = sorted(summary['by_day'].keys())
+        row = []
+        for day in sorted_days:
+            amt = summary['by_day'][day]
+            row.append(InlineKeyboardButton(
+                f"{day:02d} ({format_currency(amt)})",
+                callback_data=f"shared_day_{day}_{month}_{year}"
+            ))
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        
+        keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="uexp_menu")])
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}", reply_markup=get_user_expense_menu(update.effective_user.id))
+
+
+async def uexp_shared_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chi tiết sống chung theo ngày"""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        parts = query.data.replace("shared_day_", "").split("_")
+        day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+        
+        expenses = sheets.get_shared_day_detail(day, month, year)
+        
+        text = f"🏘 *SỐNG CHUNG — Ngày {day:02d}/{month:02d}/{year}*\n\n"
+        
+        if not expenses:
+            text += "📭 Không có chi tiêu."
+        else:
+            total = 0
+            for e in expenses:
+                text += f"• {format_currency(e['amount'])} — {e['description']} ({e['added_by']})\n"
+                total += e['amount']
+            text += f"\n💰 *Tổng ngày:* {format_currency(total)}"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔙 Thống Kê SC", callback_data="uexp_shared_stats")],
+            [InlineKeyboardButton("🔙 Menu", callback_data="uexp_menu")],
+        ]
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        await query.edit_message_text(f"❌ Lỗi: {str(e)}")
