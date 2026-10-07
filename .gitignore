@@ -36,3 +36,4 @@ Thumbs.db
 # Database (nếu có)
 *.db
 *.sqlite3
+.menu_sessions.json

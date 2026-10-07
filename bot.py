@@ -96,7 +96,8 @@ from utils.security import check_permission, is_expense_user, UNAUTHORIZED_MESSA
 
 async def global_permission_check(update: Update, context):
     """
-    Chặn user không phải admin.
+    1. Chặn và vô hiệu hóa callback query từ menu cũ/hết hạn.
+    2. Chặn user không phải admin.
     Cho phép:
     - /start (để bot ghi nhận user)
     - custpay_, custcheck_, custcancel_ (khách thanh toán)
@@ -106,6 +107,29 @@ async def global_permission_check(update: Update, context):
     if not user:
         return
     
+    # 0. Kiểm tra menu cũ / hết hạn khi người dùng bấm nút inline
+    if update.callback_query:
+        query = update.callback_query
+        data = query.data or ''
+        # Bỏ qua callback thanh toán nợ của khách
+        if not data.startswith(('custpay_', 'custcheck_', 'custcancel_', 'cust_refresh')):
+            from utils.menu_tracker import is_message_stale
+            msg = query.message
+            if msg and hasattr(msg, 'message_id') and is_message_stale(user.id, msg.message_id):
+                try:
+                    await query.answer("⏳ Menu này đã hết hạn. Vui lòng bấm /start để mở menu mới.", show_alert=True)
+                except Exception:
+                    pass
+                try:
+                    await query.edit_message_text(
+                        "⏳ _Phiên đã kết thúc. Bấm /start để mở menu mới._",
+                        parse_mode='Markdown',
+                        reply_markup=None
+                    )
+                except Exception:
+                    pass
+                raise ApplicationHandlerStop()
+
     # Admin → cho phép mọi thứ
     if check_permission(user.id):
         return

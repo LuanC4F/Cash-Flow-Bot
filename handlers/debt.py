@@ -164,11 +164,13 @@ async def no_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(UNAUTHORIZED_MESSAGE)
         return
     
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         "💳 *QUẢN LÝ NỢ*\n\nChọn chức năng:",
         parse_mode='Markdown',
         reply_markup=get_debt_keyboard()
     )
+    from utils.menu_tracker import track_menu_id
+    track_menu_id(update.effective_user.id, msg.message_id)
 
 
 CUSTOMERS_PER_PAGE = 8

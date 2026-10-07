@@ -137,41 +137,92 @@ async def safe_edit(query, text, reply_markup=None):
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 
-def track_menu_message(context: ContextTypes.DEFAULT_TYPE, message) -> None:
-    """Lưu message_id của menu/bot message để /start có thể xóa sau này."""
+def track_menu_message(context: ContextTypes.DEFAULT_TYPE, message, user_id: int = None) -> None:
+    """Lưu message_id của menu/bot message để quản lý active menu."""
     if not message:
         return
+    uid = user_id or (message.chat.id if hasattr(message, 'chat') and message.chat else None)
+    if uid:
+        from utils.menu_tracker import set_active_menu
+        set_active_menu(uid, message.message_id)
     msg_ids = context.user_data.setdefault('_menu_msg_ids', [])
     msg_ids.append(message.message_id)
-    # Giữ tối đa 10 message IDs gần nhất để tránh phình
     if len(msg_ids) > 10:
         context.user_data['_menu_msg_ids'] = msg_ids[-10:]
+
+
+async def _disable_single_message(bot, chat_id: int, mid: int) -> bool:
+    """Vô hiệu hóa 1 message: gỡ keyboard và sửa text thành thông báo phiên kết thúc."""
+    try:
+        # Bước 1: Gỡ inline keyboard.
+        # Nếu message do user gửi hoặc bot message không có keyboard -> BadRequest
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=mid,
+            reply_markup=None
+        )
+        # Bước 2: Sửa text thành thông báo hết hạn
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=mid,
+                text="⏳ _Phiên đã kết thúc. Bấm /start để mở menu mới._",
+                parse_mode='Markdown',
+                reply_markup=None
+            )
+        except Exception:
+            pass
+        return True
+    except BadRequest:
+        return False
+    except Exception as e:
+        logger.debug(f"Không sửa được message {mid}: {e}")
+        return False
 
 
 async def cleanup_stale_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Sửa các message menu cũ thành '⏳ Phiên đã kết thúc' và xóa nút bấm.
     Giữ lại lịch sử tin nhắn nhưng vô hiệu hóa inline keyboard.
-    Trả về số message đã xử lý thành công."""
-    msg_ids = context.user_data.get('_menu_msg_ids', [])
-    if not msg_ids:
+    Quét cả message trước đó trong chat và danh sách tracked menu IDs."""
+    import asyncio
+    from utils.menu_tracker import get_tracked_menu_ids, clear_tracked_menu_ids
+
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
         return 0
 
-    chat_id = update.effective_chat.id
-    cleaned = 0
-    for mid in msg_ids:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=mid,
-                text="⏳ _Phiên đã kết thúc. Bấm /start để mở menu mới._",
-                parse_mode='Markdown',
-                reply_markup=None,  # Xóa tất cả nút bấm
-            )
-            cleaned += 1
-        except BadRequest:
-            pass  # Message quá cũ, đã bị xóa, hoặc nội dung giống nhau
-        except Exception as e:
-            logger.debug(f"Không sửa được message {mid}: {e}")
+    user_id = update.effective_user.id if update.effective_user else None
+    current_mid = update.message.message_id if update.message else None
+
+    # Tập hợp các message IDs cần kiểm tra và vô hiệu hóa
+    mids_to_check = set()
+
+    # 1. Quét 20 message IDs ngay trước /start trong chat
+    if current_mid:
+        for mid in range(current_mid - 1, max(1, current_mid - 21), -1):
+            mids_to_check.add(mid)
+
+    # 2. Thêm các message IDs đã được track trong sessions
+    if user_id:
+        for mid in get_tracked_menu_ids(user_id):
+            mids_to_check.add(mid)
+
+    # 3. Message IDs từ user_data (nếu có)
+    for mid in context.user_data.get('_menu_msg_ids', []):
+        mids_to_check.add(mid)
+
+    if not mids_to_check:
+        return 0
+
+    # Chạy song song tất cả các request để phản hồi nhanh nhất
+    tasks = [_disable_single_message(context.bot, chat_id, mid) for mid in mids_to_check]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    cleaned = sum(1 for r in results if r is True)
+
+    if user_id:
+        clear_tracked_menu_ids(user_id)
+    context.user_data.pop('_menu_msg_ids', None)
+
     return cleaned
 
 
@@ -225,7 +276,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown',
             reply_markup=get_main_menu_keyboard()
         )
-        track_menu_message(context, msg)
+        track_menu_message(context, msg, user.id)
         return
     
     # Non-admin: check expense user + debt
@@ -266,7 +317,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="uexp_delete")])
         
         msg = await update.message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        track_menu_message(context, msg)
+        track_menu_message(context, msg, user.id)
         await _notify_admin_customer_start(context, user, debts)
         return
     
@@ -281,7 +332,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown',
             reply_markup=get_user_expense_menu()
         )
-        track_menu_message(context, msg)
+        track_menu_message(context, msg, user.id)
         await _notify_admin_customer_start(context, user, debts)
         return
     
@@ -307,7 +358,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         
         msg = await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
-        track_menu_message(context, msg)
+        track_menu_message(context, msg, user.id)
         await _notify_admin_customer_start(context, user, debts)
         return
     

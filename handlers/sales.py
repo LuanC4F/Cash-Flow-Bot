@@ -784,13 +784,15 @@ async def suabh_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ban command"""
     if not context.args or len(context.args) < 2:
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "📝 Cách dùng: `/ban [SKU] [Giá bán] [SL] [Người mua]`\n"
             "Ví dụ: `/ban SP01 250k 2 Minh`\n\n"
             "💡 Hoặc bấm nút 🛒 Ghi Bán Hàng để được hướng dẫn.",
             parse_mode='Markdown',
             reply_markup=get_sales_keyboard()
         )
+        from utils.menu_tracker import track_menu_id
+        track_menu_id(update.effective_user.id, msg.message_id)
         return
     
     sku = context.args[0].upper()

@@ -525,13 +525,15 @@ async def cancel_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def chi_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /chi command"""
     if not context.args or len(context.args) < 2:
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "📝 Cách dùng: `/chi [số tiền] [mô tả] [category]`\n"
             "Ví dụ: `/chi 50k Ăn trưa`\n\n"
             "💡 Hoặc bấm nút 💸 Ghi Chi Tiêu để được hướng dẫn.",
             parse_mode='Markdown',
             reply_markup=get_expense_keyboard()
         )
+        from utils.menu_tracker import track_menu_id
+        track_menu_id(update.effective_user.id, msg.message_id)
         return
     
     amount = parse_amount(context.args[0])

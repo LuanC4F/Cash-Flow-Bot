@@ -54,11 +54,13 @@ async def sanpham_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text += f"🏷 *{p['sku']}* - {p['name']}\n"
                 text += f"   💵 Cost: {format_currency(p['cost'])}\n\n"
         
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             text, 
             parse_mode='Markdown',
             reply_markup=get_product_keyboard()
         )
+        from utils.menu_tracker import track_menu_id
+        track_menu_id(update.effective_user.id, msg.message_id)
         
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: `{str(e)}`", parse_mode='Markdown')
