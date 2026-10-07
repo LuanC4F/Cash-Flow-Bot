@@ -231,6 +231,7 @@ def main():
             CommandHandler("cancel", cancel_conversation),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Sửa giá sản phẩm
@@ -245,6 +246,7 @@ def main():
             CommandHandler("cancel", cancel_conversation),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Xóa sản phẩm
@@ -258,6 +260,7 @@ def main():
             CommandHandler("cancel", cancel_conversation),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # ==================== SALES CONVERSATIONS ====================
@@ -290,6 +293,7 @@ def main():
             CommandHandler("cancel", cancel_sales),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Xóa bán hàng
@@ -303,6 +307,7 @@ def main():
             CommandHandler("cancel", cancel_sales),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Xem chi tiết đơn hàng
@@ -316,6 +321,7 @@ def main():
             CommandHandler("cancel", cancel_sales),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Sửa đơn hàng
@@ -331,6 +337,7 @@ def main():
             CommandHandler("cancel", cancel_sales),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # ==================== EXPENSE CONVERSATIONS ====================
@@ -354,6 +361,7 @@ def main():
             CommandHandler("cancel", cancel_expense),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Sửa chi tiêu
@@ -369,6 +377,7 @@ def main():
             CommandHandler("cancel", cancel_expense),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Xóa chi tiêu
@@ -382,6 +391,7 @@ def main():
             CommandHandler("cancel", cancel_expense),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # ==================== DEBT CONVERSATIONS ====================
@@ -412,6 +422,7 @@ def main():
             CallbackQueryHandler(debt_conv_fallback),  # Catch-all: end stale conversation
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Trả nợ
@@ -426,6 +437,7 @@ def main():
             CallbackQueryHandler(debt_conv_fallback),  # Catch-all
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # Xóa nợ
@@ -440,6 +452,7 @@ def main():
             CallbackQueryHandler(debt_conv_fallback),  # Catch-all
         ],
         per_message=False,
+        allow_reentry=True,
     )
     
     # ==================== ĐĂNG KÝ HANDLERS ====================
@@ -478,6 +491,7 @@ def main():
             CommandHandler("cancel", cancel_debt),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     application.add_handler(set_tid_conv, group=1)  # Group 1: tránh bị block bởi ConversationHandler group 0
     
@@ -537,6 +551,7 @@ def main():
             CommandHandler("cancel", uexp_cancel),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     application.add_handler(uexp_conv)
     
@@ -553,6 +568,7 @@ def main():
             CommandHandler("cancel", uexp_cancel),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     application.add_handler(uexp_del_conv)
     
@@ -569,6 +585,7 @@ def main():
             CommandHandler("cancel", uexp_cancel),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     application.add_handler(uexp_edit_conv)
     
@@ -601,6 +618,7 @@ def main():
             CommandHandler("cancel", addshared_cancel),
         ],
         per_message=False,
+        allow_reentry=True,
     )
     application.add_handler(addshared_conv)
     

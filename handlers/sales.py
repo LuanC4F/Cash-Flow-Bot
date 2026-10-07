@@ -60,9 +60,11 @@ async def ban_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer()
+        context.user_data.clear()
         
         try:
-            products = sheets.get_all_products()
+            import asyncio
+            products = await asyncio.to_thread(sheets.get_all_products)
             
             if not products:
                 await query.edit_message_text(

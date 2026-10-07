@@ -111,7 +111,7 @@ def safe_get_records(sheet) -> List[Dict]:
 
 def get_all_products() -> List[Dict]:
     """Get all products"""
-    sheet = get_client().worksheet(config.SHEET_PRODUCTS)
+    sheet = get_worksheet(config.SHEET_PRODUCTS)
     records = safe_get_records(sheet)
     
     products = []
