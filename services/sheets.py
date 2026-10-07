@@ -180,7 +180,7 @@ def delete_product(sku: str) -> bool:
 # ==================== SALES ====================
 
 def add_sale(sku: str, quantity: int, price: float, cost: float, 
-             customer: str = "", note: str = "") -> Dict:
+             customer: str = "", note: str = "", date: str = None) -> Dict:
     """
     Add sale transaction.
     
@@ -191,7 +191,8 @@ def add_sale(sku: str, quantity: int, price: float, cost: float,
     """
     sheet = get_client().worksheet(config.SHEET_SALES)
     
-    date = get_local_date()
+    if date is None:
+        date = get_local_date()
     total_cost = cost * quantity  # Tổng giá gốc
     profit = price - total_cost   # Lợi nhuận = Tổng thu - Tổng gốc
     

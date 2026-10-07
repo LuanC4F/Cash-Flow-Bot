@@ -42,7 +42,8 @@ from handlers.sales import (
     chitiet_start, chitiet_show,
     suabh_start, suabh_select_field, suabh_get_field, suabh_save,
     cancel_sales,
-    BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE,
+    ban_date_select, ban_date_input,
+    BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE, BAN_DATE,
     XOABH_ROW, CHITIET_ROW, SUABH_ROW, SUABH_FIELD, SUABH_VALUE
 )
 
@@ -278,6 +279,10 @@ def main():
             BAN_NOTE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ban_note),
                 CallbackQueryHandler(ban_note_skip, pattern="^skip_step$"),
+            ],
+            BAN_DATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ban_date_input),
+                CallbackQueryHandler(ban_date_select, pattern="^sale_date_"),
             ],
         },
         fallbacks=[

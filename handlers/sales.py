@@ -10,10 +10,10 @@ from utils.formatting import format_currency, parse_amount, get_month_name, esca
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 # Conversation states
-BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE = range(5)
-XOABH_ROW = 5
-CHITIET_ROW = 6
-SUABH_ROW, SUABH_FIELD, SUABH_VALUE = range(7, 10)
+BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE, BAN_DATE = range(6)
+XOABH_ROW = 6
+CHITIET_ROW = 7
+SUABH_ROW, SUABH_FIELD, SUABH_VALUE = range(8, 11)
 
 
 def get_sales_keyboard():
@@ -245,20 +245,91 @@ async def ban_customer_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ban_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Nhận ghi chú và hoàn tất"""
+    """Nhận ghi chú, hỏi ngày"""
     note = update.message.text.strip()
-    customer = context.user_data.get('sale_customer', '')
-    return await complete_sale(update, context, customer, note=note)
+    context.user_data['sale_note'] = note
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 Hôm Nay", callback_data="sale_date_today")],
+        [InlineKeyboardButton("📅 Hôm Qua", callback_data="sale_date_yesterday")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="cancel_sales")],
+    ])
+    
+    await update.message.reply_text(
+        f"✅ Ghi chú: *{note}*\n\n"
+        "📅 *Chọn ngày ghi:*\n\n"
+        "Bấm nút hoặc nhập ngày (VD: `05/10/2026`)",
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+    return BAN_DATE
 
 
 async def ban_note_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bỏ qua ghi chú và hoàn tất"""
+    """Bỏ qua ghi chú, hỏi ngày"""
     query = update.callback_query
     await query.answer()
-    customer = context.user_data.get('sale_customer', '')
-    return await complete_sale(query, context, customer, note="", is_callback=True)
+    context.user_data['sale_note'] = ""
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 Hôm Nay", callback_data="sale_date_today")],
+        [InlineKeyboardButton("📅 Hôm Qua", callback_data="sale_date_yesterday")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="cancel_sales")],
+    ])
+    
+    await query.edit_message_text(
+        "📅 *Chọn ngày ghi:*\n\n"
+        "Bấm nút hoặc nhập ngày (VD: `05/10/2026`)",
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+    return BAN_DATE
 
-async def complete_sale(update_or_query, context, customer, note="", is_callback=False):
+
+async def ban_date_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Chọn ngày nhanh qua button"""
+    query = update.callback_query
+    await query.answer()
+    
+    from datetime import timedelta, datetime
+    import config
+    
+    if query.data == "sale_date_today":
+        date = sheets.get_local_date()
+    elif query.data == "sale_date_yesterday":
+        yesterday = datetime.now(config.VN_TIMEZONE) - timedelta(days=1)
+        date = yesterday.strftime('%d/%m/%Y')
+    else:
+        date = sheets.get_local_date()
+    
+    customer = context.user_data.get('sale_customer', '')
+    note = context.user_data.get('sale_note', '')
+    return await complete_sale(query, context, customer, note=note, is_callback=True, date=date)
+
+
+async def ban_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Nhập ngày thủ công"""
+    text = update.message.text.strip()
+    
+    from datetime import datetime
+    try:
+        datetime.strptime(text, '%d/%m/%Y')
+        date = text
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Sai định dạng! Nhập lại: `dd/mm/yyyy`\n"
+            "Ví dụ: `05/10/2026`",
+            parse_mode='Markdown',
+            reply_markup=get_cancel_keyboard()
+        )
+        return BAN_DATE
+    
+    customer = context.user_data.get('sale_customer', '')
+    note = context.user_data.get('sale_note', '')
+    return await complete_sale(update, context, customer, note=note, is_callback=False, date=date)
+
+
+async def complete_sale(update_or_query, context, customer, note="", is_callback=False, date=None):
     """Hoàn tất ghi bán hàng"""
     sku = context.user_data.get('sale_sku', '')
     product = context.user_data.get('sale_product', {})
@@ -273,7 +344,8 @@ async def complete_sale(update_or_query, context, customer, note="", is_callback
             price=price,
             cost=cost,
             customer=customer,
-            note=note
+            note=note,
+            date=date
         )
         
         profit_emoji = "📈" if result['profit'] >= 0 else "📉"
@@ -289,6 +361,7 @@ async def complete_sale(update_or_query, context, customer, note="", is_callback
 🏷 Sản phẩm: {product_name} ({sku})
 📦 Số lượng: {qty}
 👤 Người mua: {customer or 'N/A'}
+📅 Ngày: {result['date']}
 {note_text}
 ━━━ Chi tiết ━━━
 💵 Giá gốc: {format_currency(cost)} × {qty} = {format_currency(total_cost)}
