@@ -137,14 +137,57 @@ async def safe_edit(query, text, reply_markup=None):
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 
-def reset_user_conversations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Kết thúc mọi conversation dở dang của user hiện tại + xóa user_data.
+def track_menu_message(context: ContextTypes.DEFAULT_TYPE, message) -> None:
+    """Lưu message_id của menu/bot message để /start có thể xóa sau này."""
+    if not message:
+        return
+    msg_ids = context.user_data.setdefault('_menu_msg_ids', [])
+    msg_ids.append(message.message_id)
+    # Giữ tối đa 10 message IDs gần nhất để tránh phình
+    if len(msg_ids) > 10:
+        context.user_data['_menu_msg_ids'] = msg_ids[-10:]
+
+
+async def cleanup_stale_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Sửa các message menu cũ thành '⏳ Phiên đã kết thúc' và xóa nút bấm.
+    Giữ lại lịch sử tin nhắn nhưng vô hiệu hóa inline keyboard.
+    Trả về số message đã xử lý thành công."""
+    msg_ids = context.user_data.get('_menu_msg_ids', [])
+    if not msg_ids:
+        return 0
+
+    chat_id = update.effective_chat.id
+    cleaned = 0
+    for mid in msg_ids:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=mid,
+                text="⏳ _Phiên đã kết thúc. Bấm /start để mở menu mới._",
+                parse_mode='Markdown',
+                reply_markup=None,  # Xóa tất cả nút bấm
+            )
+            cleaned += 1
+        except BadRequest:
+            pass  # Message quá cũ, đã bị xóa, hoặc nội dung giống nhau
+        except Exception as e:
+            logger.debug(f"Không sửa được message {mid}: {e}")
+    return cleaned
+
+
+async def reset_user_conversations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Kết thúc mọi conversation dở dang của user hiện tại,
+    xóa tin nhắn menu cũ, rồi xóa user_data.
 
     PTB không có public API để reset state, nên dùng _get_key/_update_state
     (ổn định từ v20 → v22). Trả về số conversation đã bị hủy.
     """
     from telegram.ext import ConversationHandler
 
+    # 1. Xóa message cũ
+    await cleanup_stale_messages(update, context)
+
+    # 2. Reset conversation states
     cleared = 0
     for handlers in context.application.handlers.values():
         for handler in handlers:
@@ -164,7 +207,7 @@ def reset_user_conversations(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý lệnh /start - phân quyền 3 cấp"""
-    reset_user_conversations(update, context)
+    await reset_user_conversations(update, context)
     user = update.effective_user
     
     # Admin: menu đầy đủ
@@ -177,11 +220,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ━━━━━━━━━━━━━━━━━
 📌 *Chọn chức năng bên dưới:*
 """
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             welcome_message, 
             parse_mode='Markdown',
             reply_markup=get_main_menu_keyboard()
         )
+        track_menu_message(context, msg)
         return
     
     # Non-admin: check expense user + debt
@@ -221,7 +265,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         keyboard.append([InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="uexp_delete")])
         
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        msg = await update.message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        track_menu_message(context, msg)
         await _notify_admin_customer_start(context, user, debts)
         return
     
@@ -229,13 +274,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if has_expense:
         from handlers.user_expense import get_user_expense_menu
         
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             f"👋 Xin chào {user.first_name or 'bạn'}!\n\n"
             f"💸 *CHI TIÊU CỦA BẠN*\n\n"
             f"📌 Chọn chức năng bên dưới:",
             parse_mode='Markdown',
             reply_markup=get_user_expense_menu()
         )
+        track_menu_message(context, msg)
         await _notify_admin_customer_start(context, user, debts)
         return
     
@@ -260,7 +306,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔄 Kiểm Tra Lại", callback_data="cust_refresh")],
         ])
         
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
+        msg = await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
+        track_menu_message(context, msg)
         await _notify_admin_customer_start(context, user, debts)
         return
     
