@@ -137,8 +137,34 @@ async def safe_edit(query, text, reply_markup=None):
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
 
+def reset_user_conversations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Kết thúc mọi conversation dở dang của user hiện tại + xóa user_data.
+
+    PTB không có public API để reset state, nên dùng _get_key/_update_state
+    (ổn định từ v20 → v22). Trả về số conversation đã bị hủy.
+    """
+    from telegram.ext import ConversationHandler
+
+    cleared = 0
+    for handlers in context.application.handlers.values():
+        for handler in handlers:
+            if not isinstance(handler, ConversationHandler):
+                continue
+            try:
+                key = handler._get_key(update)
+                if key in handler._conversations:
+                    handler._update_state(ConversationHandler.END, key)
+                    cleared += 1
+            except Exception as e:
+                logger.warning(f"Không reset được conversation {handler.name}: {e}")
+
+    context.user_data.clear()
+    return cleared
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý lệnh /start - phân quyền 3 cấp"""
+    reset_user_conversations(update, context)
     user = update.effective_user
     
     # Admin: menu đầy đủ
