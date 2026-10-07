@@ -723,7 +723,10 @@ async def uexp_shared_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if row:
             keyboard.append(row)
         
-        keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="uexp_menu")])
+        # Admin → về menu chi tiêu admin, User → về menu chi tiêu user
+        from utils.security import check_permission
+        back_data = "menu_chi" if check_permission(update.effective_user.id) else "uexp_menu"
+        keyboard.append([InlineKeyboardButton("🔙 Menu Chi Tiêu", callback_data=back_data)])
         
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:

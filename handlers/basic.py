@@ -45,6 +45,9 @@ def get_expense_keyboard():
             InlineKeyboardButton("📊 Tháng", callback_data="expense_month"),
         ],
         [
+            InlineKeyboardButton("🏘 Sống Chung", callback_data="uexp_shared_stats"),
+        ],
+        [
             InlineKeyboardButton("🗑 Xóa Chi Tiêu", callback_data="expense_delete"),
             InlineKeyboardButton("🔙 Menu", callback_data="menu_main"),
         ]
