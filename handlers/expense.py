@@ -198,8 +198,7 @@ async def chi_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Validate format dd/mm/yyyy
     from datetime import datetime
     try:
-        datetime.strptime(text, '%d/%m/%Y')
-        date = text
+        date = datetime.strptime(text, '%d/%m/%Y').strftime('%d/%m/%Y')
     except ValueError:
         await update.message.reply_text(
             "❌ Sai định dạng! Nhập lại: `dd/mm/yyyy`\n"
