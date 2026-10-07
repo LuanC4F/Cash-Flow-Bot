@@ -534,8 +534,9 @@ def get_today_expense_summary() -> Dict:
     }
 
 
-def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
-    """Get monthly expense summary"""
+def get_month_expense_summary(month: int = None, year: int = None, shared_tid: str = None) -> Dict:
+    """Get monthly expense summary.
+    shared_tid: nếu có, cộng thêm các khoản Sống chung do user này ghi."""
     if month is None:
         month = datetime.now(config.VN_TIMEZONE).month
     if year is None:
@@ -566,7 +567,21 @@ def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
             except ValueError:
                 pass
     
-    
+    if shared_tid:
+        tid = _normalize_tid(shared_tid)
+        for row in _get_all_shared_records():
+            if _normalize_tid(row.get('AddedByTid', '')) != tid:
+                continue
+            try:
+                dt = datetime.strptime(row.get('Date', ''), '%d/%m/%Y')
+                amount = float(row.get('Amount', 0) or 0)
+            except (ValueError, TypeError):
+                continue
+            if dt.month == month and dt.year == year and amount:
+                total += amount
+                count += 1
+                by_category['Shared'] = by_category.get('Shared', 0) + amount
+                by_day[dt.day] = by_day.get(dt.day, 0) + amount
     
     return {
         'month': month,
@@ -578,8 +593,9 @@ def get_month_expense_summary(month: int = None, year: int = None) -> Dict:
     }
 
 
-def get_expenses_by_date(day: int, month: int = None, year: int = None) -> List[Dict]:
-    """Get expense details for a specific date"""
+def get_expenses_by_date(day: int, month: int = None, year: int = None, shared_tid: str = None) -> List[Dict]:
+    """Get expense details for a specific date.
+    shared_tid: nếu có, kèm các khoản Sống chung do user này ghi."""
     if month is None:
         month = datetime.now(config.VN_TIMEZONE).month
     if year is None:
@@ -600,6 +616,12 @@ def get_expenses_by_date(day: int, month: int = None, year: int = None) -> List[
                 'description': row.get('Description', ''),
                 'category': row.get('Category', '')
             })
+    
+    if shared_tid:
+        tid = _normalize_tid(shared_tid)
+        for i, row in enumerate(_get_all_shared_records(), start=2):
+            if row.get('Date', '') == target_date and _normalize_tid(row.get('AddedByTid', '')) == tid:
+                expenses.append(_parse_shared_row(row, i))
     
     return expenses
 

@@ -658,7 +658,7 @@ Xem báo cáo thu chi và lợi nhuận:
         from utils.formatting import format_currency, get_month_name, get_category_emoji
         
         try:
-            summary = sheets.get_month_expense_summary()
+            summary = sheets.get_month_expense_summary(shared_tid=str(query.from_user.id))
             month_name = get_month_name(summary['month'])
             
             text = f"📊 CHI TIÊU {month_name.upper()}/{summary['year']}\n\n"
@@ -669,7 +669,8 @@ Xem báo cáo thu chi và lợi nhuận:
                 text += "📂 Theo loại:\n"
                 for cat, total in summary['by_category'].items():
                     emoji = get_category_emoji(cat)
-                    text += f"   {emoji} {cat}: {format_currency(total)}\n"
+                    label = "Sống chung" if cat == "Shared" else cat
+                    text += f"   {emoji} {label}: {format_currency(total)}\n"
             
             # Thêm chi tiêu theo ngày
             if summary.get('by_day'):
@@ -707,7 +708,7 @@ Xem báo cáo thu chi và lợi nhuận:
         
         try:
             day = int(data.replace("expense_day_", ""))
-            expenses = sheets.get_expenses_by_date(day)
+            expenses = sheets.get_expenses_by_date(day, shared_tid=str(query.from_user.id))
             
             from datetime import datetime
             import config
