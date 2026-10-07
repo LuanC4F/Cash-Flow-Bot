@@ -323,6 +323,11 @@ async def ban_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return BAN_DATE
     
+    try:
+        await update.message.chat.send_action("typing")
+    except Exception:
+        pass
+    
     customer = context.user_data.get('sale_customer', '')
     note = context.user_data.get('sale_note', '')
     return await complete_sale(update, context, customer, note=note, is_callback=False, date=date)
@@ -337,7 +342,9 @@ async def complete_sale(update_or_query, context, customer, note="", is_callback
     cost = product.get('cost', 0)  # Giá gốc/sp
     
     try:
-        result = sheets.add_sale(
+        import asyncio
+        result = await asyncio.to_thread(
+            sheets.add_sale,
             sku=sku,
             quantity=qty,
             price=price,

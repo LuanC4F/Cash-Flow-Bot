@@ -208,6 +208,11 @@ async def chi_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHI_DATE
     
+    try:
+        await update.message.chat.send_action("typing")
+    except Exception:
+        pass
+    
     return await _save_expense_msg(update, context, date)
 
 
@@ -220,10 +225,16 @@ async def _save_expense(query, context, date):
     admin_tid = str(query.from_user.id)
     
     try:
+        import asyncio
         if category == 'Shared':
-            result = sheets.add_shared_expense(amount, description, added_by_name=added_by, added_by_tid=admin_tid, date=date)
+            result = await asyncio.to_thread(
+                sheets.add_shared_expense, amount, description, 
+                added_by_name=added_by, added_by_tid=admin_tid, date=date
+            )
         else:
-            result = sheets.add_expense(amount, description, category, date=date)
+            result = await asyncio.to_thread(
+                sheets.add_expense, amount, description, category, date=date
+            )
         emoji = get_category_emoji(category)
         
         text = f"""✅ ĐÃ GHI CHI TIÊU!
@@ -233,14 +244,16 @@ async def _save_expense(query, context, date):
 {emoji} Loại: {category}
 📅 Ngày: {result['date']}
 """
-        if category == 'Shared':
-            shared = sheets.get_shared_today_summary()
-            text += f"━━━ Sống chung hôm nay ━━━\n"
-            text += f"📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
-        else:
-            today_summary = sheets.get_today_expense_summary()
-            text += f"━━━ Chi tiêu hôm nay ━━━\n"
-            text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
+        today_date = sheets.get_local_date()
+        if result['date'] == today_date:
+            if category == 'Shared':
+                shared = await asyncio.to_thread(sheets.get_shared_today_summary)
+                text += f"━━━ Sống chung hôm nay ━━━\n"
+                text += f"📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
+            else:
+                today_summary = await asyncio.to_thread(sheets.get_today_expense_summary)
+                text += f"━━━ Chi tiêu hôm nay ━━━\n"
+                text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
         
         await query.edit_message_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:
@@ -259,10 +272,16 @@ async def _save_expense_msg(update, context, date):
     admin_tid = str(update.effective_user.id)
     
     try:
+        import asyncio
         if category == 'Shared':
-            result = sheets.add_shared_expense(amount, description, added_by_name=added_by, added_by_tid=admin_tid, date=date)
+            result = await asyncio.to_thread(
+                sheets.add_shared_expense, amount, description, 
+                added_by_name=added_by, added_by_tid=admin_tid, date=date
+            )
         else:
-            result = sheets.add_expense(amount, description, category, date=date)
+            result = await asyncio.to_thread(
+                sheets.add_expense, amount, description, category, date=date
+            )
         emoji = get_category_emoji(category)
         
         text = f"""✅ ĐÃ GHI CHI TIÊU!
@@ -272,14 +291,16 @@ async def _save_expense_msg(update, context, date):
 {emoji} Loại: {category}
 📅 Ngày: {result['date']}
 """
-        if category == 'Shared':
-            shared = sheets.get_shared_today_summary()
-            text += f"━━━ Sống chung hôm nay ━━━\n"
-            text += f"📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
-        else:
-            today_summary = sheets.get_today_expense_summary()
-            text += f"━━━ Chi tiêu hôm nay ━━━\n"
-            text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
+        today_date = sheets.get_local_date()
+        if result['date'] == today_date:
+            if category == 'Shared':
+                shared = await asyncio.to_thread(sheets.get_shared_today_summary)
+                text += f"━━━ Sống chung hôm nay ━━━\n"
+                text += f"📊 Số lần: {shared['count']} | 💸 Tổng: {format_currency(shared['total'])}"
+            else:
+                today_summary = await asyncio.to_thread(sheets.get_today_expense_summary)
+                text += f"━━━ Chi tiêu hôm nay ━━━\n"
+                text += f"📊 Số lần: {today_summary['count']} | 💸 Tổng: {format_currency(today_summary['total'])}"
         
         await update.message.reply_text(text, reply_markup=get_expense_keyboard())
     except Exception as e:

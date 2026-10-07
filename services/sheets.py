@@ -48,6 +48,28 @@ def get_client():
     return _spreadsheet
 
 
+_worksheet_cache = {}
+
+
+def get_worksheet(title: str):
+    """Lấy worksheet có cache để tránh gọi API fetch metadata nhiều lần"""
+    global _worksheet_cache
+    if title not in _worksheet_cache:
+        sp = get_client()
+        _worksheet_cache[title] = sp.worksheet(title)
+    return _worksheet_cache[title]
+
+
+def clear_worksheet_cache(title: str = None):
+    """Xóa cache worksheet khi cần"""
+    global _worksheet_cache
+    if title:
+        _worksheet_cache.pop(title, None)
+    else:
+        _worksheet_cache.clear()
+
+
+
 def get_local_now() -> str:
     """Get current time in Vietnam timezone"""
     return datetime.now(config.VN_TIMEZONE).strftime('%d/%m/%Y %H:%M')
@@ -189,7 +211,7 @@ def add_sale(sku: str, quantity: int, price: float, cost: float,
     - profit = price - (cost × quantity)
     - revenue = price (tổng tiền thu)
     """
-    sheet = get_client().worksheet(config.SHEET_SALES)
+    sheet = get_worksheet(config.SHEET_SALES)
     
     if date is None:
         date = get_local_date()
@@ -442,7 +464,7 @@ EXPENSE_COLS = {'date': 1, 'amount': 2, 'description': 3, 'category': 4}
 
 def add_expense(amount: float, description: str, category: str = "Living", date: str = None) -> Dict:
     """Add expense. If date is None, uses today."""
-    sheet = get_client().worksheet(config.SHEET_EXPENSES)
+    sheet = get_worksheet(config.SHEET_EXPENSES)
     
     if date is None:
         date = get_local_date()
@@ -1078,7 +1100,7 @@ def _get_user_sheet(telegram_id: str):
     info = get_expense_user_info(str(telegram_id).strip())
     if not info:
         raise ValueError("User không có quyền chi tiêu")
-    return get_client().worksheet(info['sheet_name'])
+    return get_worksheet(info['sheet_name'])
 
 
 def add_user_expense(telegram_id: str, amount: float, description: str, category: str, date: str = None) -> Dict:
@@ -1267,12 +1289,13 @@ _shared_partners_cache_time = 0
 
 def _get_settings_sheet():
     """Get or create Settings sheet."""
-    sp = get_client()
     try:
-        return sp.worksheet(SETTINGS_SHEET)
+        return get_worksheet(SETTINGS_SHEET)
     except gspread.WorksheetNotFound:
+        sp = get_client()
         sheet = sp.add_worksheet(title=SETTINGS_SHEET, rows=50, cols=3)
         sheet.append_row(["Key", "Value", "Note"])
+        _worksheet_cache[SETTINGS_SHEET] = sheet
         return sheet
 
 
@@ -1352,12 +1375,13 @@ def remove_shared_partner(telegram_id: str) -> bool:
 
 def _get_shared_sheet():
     """Get or create shared expense sheet."""
-    sp = get_client()
     try:
-        return sp.worksheet(SHARED_SHEET)
+        return get_worksheet(SHARED_SHEET)
     except gspread.WorksheetNotFound:
+        sp = get_client()
         sheet = sp.add_worksheet(title=SHARED_SHEET, rows=1000, cols=len(SHARED_HEADERS))
         sheet.append_row(SHARED_HEADERS)
+        _worksheet_cache[SHARED_SHEET] = sheet
         return sheet
 
 
