@@ -94,6 +94,46 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 from utils.security import check_permission, is_expense_user, UNAUTHORIZED_MESSAGE as SEC_UNAUTHORIZED
 
 
+def _user_in_conversation(update: Update, context) -> bool:
+    """True nếu user đang ở giữa một ConversationHandler (bất kỳ group nào)."""
+    for handlers in context.application.handlers.values():
+        for handler in handlers:
+            if not isinstance(handler, ConversationHandler):
+                continue
+            try:
+                if handler._get_key(update) in handler._conversations:
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+async def _strip_keyboards(bot, chat_id: int, message_ids) -> None:
+    """Gỡ inline keyboard của các message (giữ nguyên nội dung). Lỗi thì bỏ qua."""
+    import asyncio
+
+    async def strip(mid):
+        try:
+            await bot.edit_message_reply_markup(chat_id=chat_id, message_id=mid, reply_markup=None)
+        except Exception:
+            pass  # Message của user / không có nút / đã bị xóa
+
+    await asyncio.gather(*(strip(mid) for mid in message_ids))
+
+
+async def strip_previous_prompt_buttons(update: Update, context):
+    """Khi user nhập text trong flow đang dở (số tiền, mô tả, ngày...),
+    gỡ nút của prompt cũ phía trên để tránh bấm nhầm 'Hủy' sau khi đã lưu.
+    Chạy nền để không làm chậm phản hồi."""
+    msg = update.message
+    if not msg or not update.effective_chat or not _user_in_conversation(update, context):
+        return
+    prev_ids = [mid for mid in range(msg.message_id - 1, msg.message_id - 4, -1) if mid > 0]
+    context.application.create_task(
+        _strip_keyboards(context.bot, update.effective_chat.id, prev_ids)
+    )
+
+
 async def global_permission_check(update: Update, context):
     """
     1. Chặn và vô hiệu hóa callback query từ menu cũ/hết hạn.
@@ -480,6 +520,12 @@ def main():
     )
     
     # ==================== ĐĂNG KÝ HANDLERS ====================
+    
+    # 🧹 Gỡ nút prompt cũ khi user nhập text trong flow (group -2: phải chạy
+    # trước khi conversation xử lý, vì sau bước cuối state đã END)
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, strip_previous_prompt_buttons), group=-2
+    )
     
     # 🔒 GLOBAL PERMISSION CHECK (group -1: chạy TRƯỚC tất cả)
     application.add_handler(
