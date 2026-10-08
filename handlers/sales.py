@@ -9,6 +9,9 @@ from services import sheets
 from utils.formatting import format_currency, parse_amount, get_month_name, escape_markdown
 from utils.security import check_permission, UNAUTHORIZED_MESSAGE
 
+import logging
+logger = logging.getLogger(__name__)
+
 # Conversation states
 BAN_SELECT_SP, BAN_PRICE, BAN_QTY, BAN_CUSTOMER, BAN_NOTE, BAN_DATE = range(6)
 XOABH_ROW = 6
@@ -312,6 +315,7 @@ async def ban_date_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ban_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Nhập ngày thủ công"""
     text = update.message.text.strip()
+    logger.info(f"[ban_date_input] user={update.effective_user.id} text={text!r}")
     
     from datetime import datetime
     try:
@@ -390,6 +394,7 @@ async def complete_sale(update_or_query, context, customer, note="", is_callback
             )
             
     except Exception as e:
+        logger.error(f"[complete_sale] Lỗi ghi bán: {e}", exc_info=True)
         error_text = f"❌ Lỗi: `{str(e)}`"
         if is_callback:
             await update_or_query.edit_message_text(error_text, parse_mode='Markdown')

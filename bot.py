@@ -254,6 +254,33 @@ async def error_handler(update: Update, context):
             pass  # Bỏ qua nếu không gửi được
 
 
+async def orphan_text_fallback(update: Update, context):
+    """Bắt text rơi ngoài mọi ConversationHandler.
+    Nguyên nhân phổ biến: bot restart/redeploy → state trong RAM bị mất,
+    user gửi tiếp text (ngày, số tiền...) nhưng không còn conversation nào nhận."""
+    if not update.message or not update.message.text:
+        return
+
+    user = update.effective_user
+    if not user:
+        return
+
+    # Chỉ xử lý cho admin và expense users
+    if not check_permission(user.id) and not is_expense_user(user.id):
+        return
+
+    text = update.message.text.strip()
+    logger.info(f"[orphan_text] user={user.id} text={text!r} — không thuộc conversation nào")
+
+    await update.message.reply_text(
+        "⚠️ *Phiên nhập liệu trước đó đã bị gián đoạn*\n"
+        "_(do bot vừa cập nhật hoặc khởi động lại)_\n\n"
+        "Tin nhắn của bạn không được xử lý.\n"
+        "👉 Bấm /start để mở lại menu và thao tác lại.",
+        parse_mode='Markdown'
+    )
+
+
 async def unknown_command(update: Update, context):
     """Xử lý lệnh không xác định"""
     if not await check_user_permission(update, context):
@@ -824,6 +851,9 @@ def main():
             )
     
     application.add_handler(CommandHandler("songchung", songchung_command))
+    
+    # 🛡️ Fallback: bắt text rơi ngoài mọi conversation (bot restart mất state)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, orphan_text_fallback))
     
     # Handler cho lệnh không xác định
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
