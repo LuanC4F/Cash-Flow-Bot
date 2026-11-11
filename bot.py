@@ -879,8 +879,17 @@ def main():
         from starlette.responses import JSONResponse, PlainTextResponse
         from starlette.routing import Route
         from contextlib import asynccontextmanager
+        from pathlib import Path
+        from vault_backend import vault_middleware
+        from vault_backend.bot_integration import (
+            build_bot_vault_routes,
+            create_bot_vault_runtime,
+            startup_vault_on_bot,
+        )
         
         logger.info(f"🌐 Webhook mode: {webhook_url}")
+        vault_runtime = create_bot_vault_runtime()
+        vault_static_dir = Path(__file__).resolve().parent / "vault_static"
         
         @asynccontextmanager
         async def lifespan(app):
@@ -892,8 +901,15 @@ def main():
                 allowed_updates=Update.ALL_TYPES,
                 drop_pending_updates=True,
             )
-            logger.info("✅ Bot started + webhook set")
+            pg_vault_store = await startup_vault_on_bot(
+                runtime=vault_runtime,
+                bot=application.bot,
+                webhook_url=webhook_url,
+            )
+            logger.info("✅ Bot started + webhook set + Gmail Vault mounted")
             yield
+            if pg_vault_store is not None:
+                await pg_vault_store.close()
             await application.stop()
             await application.shutdown()
             logger.info("🛑 Bot stopped")
@@ -935,11 +951,13 @@ def main():
         
         starlette_app = Starlette(
             lifespan=lifespan,
+            middleware=vault_middleware(),
             routes=[
                 Route(f"/{config.BOT_TOKEN}", telegram_webhook, methods=["POST"]),
                 Route("/sepay-webhook", sepay_webhook, methods=["POST"]),
                 Route("/health", health_check, methods=["GET"]),
                 Route("/", health_check, methods=["GET"]),
+                *build_bot_vault_routes(vault_runtime, vault_static_dir),
             ],
         )
         
