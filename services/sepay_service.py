@@ -7,7 +7,10 @@ import os
 import time
 import logging
 import re
-from urllib.parse import quote
+from typing import List, Optional, Tuple
+from urllib.parse import quote, urlencode
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -31,34 +34,88 @@ def _generate_payment_code() -> str:
     return f"{PAYMENT_CODE_PREFIX}{ts}"
 
 
-# ==================== VIETQR ====================
+# ==================== VIETQR (SEPAY) ====================
+
+_QR_ENDPOINTS = (
+    "https://qr.sepay.vn/img",
+    "https://vietqr.app/img",
+)
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def _build_sepay_qr_query(amount: int, content: str) -> str:
+    """Build query string for SePay VietQR PNG endpoints."""
+    params = {
+        "acc": VIETQR_ACCOUNT_NO,
+        "bank": VIETQR_BANK_ID,
+        "amount": int(amount),
+        "des": content,
+        "template": "compact",
+        "showinfo": "true",
+        "fullacc": "true",
+    }
+    if VIETQR_ACCOUNT_NAME:
+        params["holder"] = VIETQR_ACCOUNT_NAME
+    return urlencode(params, quote_via=quote)
+
+
+def generate_qr_urls(amount: int, content: str) -> List[str]:
+    """Tạo danh sách URL ảnh QR PNG (chính + dự phòng) từ SePay.
+
+    img.vietqr.io hiện 301 redirect sang SVG (image/svg+xml) mà Telegram send_photo
+    không hỗ trợ, nên chuyển sang endpoint PNG trực tiếp của SePay.
+    """
+    query = _build_sepay_qr_query(amount, content)
+    return [f"{base}?{query}" for base in _QR_ENDPOINTS]
+
 
 def generate_vietqr_url(amount: int, content: str) -> str:
-    """Tạo URL ảnh QR VietQR (miễn phí, không cần API key).
-    
-    Returns: URL ảnh QR có sẵn số tiền + nội dung CK.
+    """Tạo URL ảnh QR chuẩn VietQR PNG từ SePay (miễn phí, không cần API key)."""
+    return generate_qr_urls(amount, content)[0]
+
+
+def fetch_qr_image(urls: List[str], timeout: int = 15) -> Optional[Tuple[bytes, str]]:
+    """Tải ảnh QR raster (PNG/JPEG) hợp lệ từ danh sách URL.
+
+    Kiểm tra magic bytes để đảm bảo không gửi nhầm SVG/HTML cho Telegram send_photo.
+    Returns: (image_bytes, filename) hoặc None nếu tất cả thất bại.
     """
-    account_name = quote(VIETQR_ACCOUNT_NAME)
-    add_info = quote(content)
-    return (
-        f"https://img.vietqr.io/image/"
-        f"{VIETQR_BANK_ID}-{VIETQR_ACCOUNT_NO}-compact2.jpg"
-        f"?amount={amount}&addInfo={add_info}&accountName={account_name}"
-    )
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for url in urls:
+        try:
+            resp = requests.get(url, headers=headers, timeout=timeout)
+            content_type = resp.headers.get("Content-Type", "")
+            data = resp.content
+            if resp.status_code != 200:
+                logger.warning(f"QR fetch failed ({resp.status_code}) from {url}")
+                continue
+            if data.startswith(_PNG_MAGIC):
+                return data, "qr_payment.png"
+            if data.startswith(_JPEG_MAGIC):
+                return data, "qr_payment.jpg"
+            logger.warning(
+                f"QR fetch returned non-raster image ({content_type}, {len(data)} bytes) from {url}"
+            )
+        except Exception as e:
+            logger.warning(f"QR fetch error from {url}: {e}")
+    return None
 
 
 # ==================== CREATE PAYMENT ====================
 
 def create_payment(customer: str, amount: int) -> dict:
-    """Tạo payment mới: sinh code + QR URL + lưu pending (RAM + Sheets).
+    """Tạo payment mới: sinh code + QR URLs + lưu pending (RAM + Sheets).
     
-    Returns: {payment_code, qr_url, amount, bank_info}
+    Returns: {payment_code, qr_url, qr_urls, amount, bank_info}
     """
     if not VIETQR_ACCOUNT_NO:
         raise ValueError("Chưa cấu hình VIETQR_ACCOUNT_NO trong .env")
     
     payment_code = _generate_payment_code()
-    qr_url = generate_vietqr_url(amount, payment_code)
+    qr_urls = generate_qr_urls(amount, payment_code)
+    qr_url = qr_urls[0]
     
     # Lưu vào RAM (cache nhanh)
     _pending_payments[payment_code] = {
@@ -83,6 +140,7 @@ def create_payment(customer: str, amount: int) -> dict:
     return {
         'payment_code': payment_code,
         'qr_url': qr_url,
+        'qr_urls': qr_urls,
         'amount': amount,
         'bank_id': VIETQR_BANK_ID,
         'account_no': VIETQR_ACCOUNT_NO,

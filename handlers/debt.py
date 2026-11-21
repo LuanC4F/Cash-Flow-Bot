@@ -643,6 +643,46 @@ async def debt_customer_detail(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # ==================== SEPAY THANH TOÁN ====================
 
+async def _send_qr_payment_message(bot, chat_id: int, qr_urls: list, caption: str, reply_markup):
+    """Tải ảnh QR PNG hợp lệ và gửi qua Telegram send_photo; fallback URL rồi text."""
+    import asyncio
+    import io
+    from services.sepay_service import fetch_qr_image
+
+    fetched = await asyncio.to_thread(fetch_qr_image, qr_urls)
+    if fetched:
+        data, filename = fetched
+        try:
+            qr_bytes = io.BytesIO(data)
+            qr_bytes.name = filename
+            return await bot.send_photo(
+                chat_id=chat_id,
+                photo=qr_bytes,
+                caption=caption,
+                reply_markup=reply_markup,
+            )
+        except Exception as e:
+            logger.warning(f"send_photo(bytes) failed: {e}")
+
+    for url in qr_urls:
+        try:
+            return await bot.send_photo(
+                chat_id=chat_id,
+                photo=url,
+                caption=caption,
+                reply_markup=reply_markup,
+            )
+        except Exception as e:
+            logger.warning(f"send_photo(url) failed for {url}: {e}")
+
+    logger.error("All QR photo attempts failed; falling back to text-only message")
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=caption,
+        reply_markup=reply_markup,
+    )
+
+
 async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Tạo QR thanh toán SePay + VietQR cho khách"""
     query = update.callback_query
@@ -684,40 +724,15 @@ async def debt_create_paylink(update: Update, context: ContextTypes.DEFAULT_TYPE
             [InlineKeyboardButton("❌ Hủy đơn", callback_data=f"debt_cancelqr_{customer[:15]}")],
         ]
         
-        qr_url = result['qr_url']
+        qr_urls = result.get('qr_urls') or [result['qr_url']]
         chat_id = query.message.chat_id
-        qr_msg = None
-        sent = False
-        
-        try:
-            qr_msg = await context.bot.send_photo(
-                chat_id=chat_id, photo=qr_url, caption=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            sent = True
-        except Exception:
-            pass
-        
-        if not sent:
-            try:
-                import urllib.request, io
-                req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    qr_bytes = io.BytesIO(resp.read())
-                    qr_bytes.name = 'qr_payment.jpg'
-                qr_msg = await context.bot.send_photo(
-                    chat_id=chat_id, photo=qr_bytes, caption=caption,
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                sent = True
-            except Exception:
-                pass
-        
-        if not sent:
-            qr_msg = await context.bot.send_message(
-                chat_id=chat_id, text=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+        qr_msg = await _send_qr_payment_message(
+            context.bot,
+            chat_id=chat_id,
+            qr_urls=qr_urls,
+            caption=caption,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
         
         if qr_msg:
             context.user_data['qr_message_id'] = qr_msg.message_id
@@ -1196,39 +1211,14 @@ async def cust_pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("❌ Hủy", callback_data=f"custcancel_{customer[:15]}")],
         ]
         
-        qr_url = result['qr_url']
-        qr_msg = None
-        sent = False
-        
-        try:
-            qr_msg = await context.bot.send_photo(
-                chat_id=chat_id, photo=qr_url, caption=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            sent = True
-        except Exception:
-            pass
-        
-        if not sent:
-            try:
-                import urllib.request, io
-                req = urllib.request.Request(qr_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    qr_bytes = io.BytesIO(resp.read())
-                    qr_bytes.name = 'qr_payment.jpg'
-                qr_msg = await context.bot.send_photo(
-                    chat_id=chat_id, photo=qr_bytes, caption=caption,
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-                sent = True
-            except Exception:
-                pass
-        
-        if not sent:
-            qr_msg = await context.bot.send_message(
-                chat_id=chat_id, text=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+        qr_urls = result.get('qr_urls') or [result['qr_url']]
+        qr_msg = await _send_qr_payment_message(
+            context.bot,
+            chat_id=chat_id,
+            qr_urls=qr_urls,
+            caption=caption,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
         
         if qr_msg:
             update_payment_meta(payment_code, chat_id=chat_id,
